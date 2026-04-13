@@ -1,0 +1,2075 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ARGOS — Operations Intelligence Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+:root{
+  --navy:#101B46;--lime:#C2D500;--teal:#00B580;--muted:#4A5568;
+  --red:#E53E3E;--yellow:#D69E2E;--purple:#6B46C1;--blue:#3182CE;
+  --bg:#F5F6F7;--card:#FFFFFF;--border:#E2E8F0;
+  --display:'Barlow Condensed',sans-serif;--body:'Barlow',sans-serif;
+  --radius:8px;--shadow:0 2px 8px rgba(16,27,70,0.08);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:var(--body);background:var(--bg);color:var(--navy);min-height:100vh;}
+
+/* ── PRINT / REPORT ── */
+#print-overlay{display:none;}
+@media print{
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #app,#login-screen,#setup-screen,#loading{display:none!important;}
+  #print-overlay{display:block!important;}
+  .report-section{page-break-inside:avoid;margin-bottom:24px;}
+}
+
+/* ── SETUP SCREEN ── */
+#setup-screen{display:none;min-height:100vh;align-items:center;justify-content:center;background:var(--bg);padding:24px;}
+#setup-screen.show{display:flex;}
+.setup-card{background:var(--card);border-left:4px solid var(--yellow);border-radius:var(--radius);box-shadow:var(--shadow);padding:48px;max-width:520px;width:100%;}
+.setup-logo{font-family:var(--display);font-weight:800;font-size:36px;letter-spacing:4px;color:var(--navy);margin-bottom:8px;}
+.setup-title{font-family:var(--display);font-weight:700;font-size:22px;color:var(--navy);margin-bottom:6px;}
+.setup-sub{font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:24px;}
+.setup-step{display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;padding:12px;background:var(--bg);border-radius:var(--radius);}
+.setup-n{min-width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--display);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.setup-t{font-size:12px;color:var(--navy);line-height:1.6;}
+.setup-t code{background:#EEF0FF;padding:2px 6px;border-radius:3px;font-size:11px;}
+
+/* ── LOGIN ── */
+#login-screen{display:none;min-height:100vh;align-items:center;justify-content:center;background:linear-gradient(135deg,#F5F6F7,#fff);padding:24px;}
+#login-screen.show{display:flex;}
+.login-card{background:var(--card);border-left:4px solid var(--lime);border-radius:var(--radius);box-shadow:0 8px 40px rgba(16,27,70,0.12);padding:52px 44px;max-width:440px;width:100%;text-align:center;}
+.login-logo{font-family:var(--display);font-weight:800;font-size:64px;color:var(--navy);letter-spacing:8px;line-height:1;}
+.login-tag{font-family:var(--display);font-weight:600;font-size:11px;letter-spacing:4px;color:var(--teal);margin-top:4px;}
+.login-div{width:44px;height:3px;background:var(--lime);margin:16px auto 18px;}
+.login-title{font-family:var(--display);font-weight:700;font-size:20px;margin-bottom:6px;}
+.login-sub{font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.6;}
+.isle-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:24px;}
+.isle-chip{background:var(--bg);border-left:3px solid var(--teal);padding:9px 12px;border-radius:var(--radius);text-align:left;}
+.isle-chip strong{font-family:var(--display);font-weight:700;font-size:14px;display:block;}
+.isle-chip span{font-size:10px;color:var(--muted);}
+.name-row{display:flex;gap:8px;margin-bottom:14px;}
+.name-input{flex:1;padding:10px 13px;border:2px solid var(--border);border-radius:var(--radius);font-family:var(--body);font-size:13px;outline:none;}
+.name-input:focus{border-color:var(--navy);}
+.btn-enter{background:var(--navy);color:#fff;border:none;border-radius:var(--radius);padding:10px 18px;font-family:var(--display);font-weight:700;font-size:14px;cursor:pointer;}
+.btn-enter:hover{background:#1a2a6e;}
+.login-note{font-size:10px;color:var(--muted);line-height:1.6;}
+
+/* ── APP ── */
+#app{display:none;flex-direction:column;min-height:100vh;}
+#app.show{display:flex;}
+
+/* ── HEADER ── */
+header{background:var(--navy);height:60px;padding:0 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(16,27,70,.3);}
+.h-logo{font-family:var(--display);font-weight:800;font-size:24px;color:#fff;letter-spacing:4px;}
+.h-logo span{display:block;font-size:8px;letter-spacing:3px;color:var(--lime);margin-top:-3px;}
+.h-right{display:flex;align-items:center;gap:18px;}
+.pulse-row{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.5);}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--lime);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.2;}}
+.hbtn{background:transparent;border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.7);border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:var(--body);}
+.hbtn:hover{color:#fff;border-color:rgba(255,255,255,.5);}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--lime);color:var(--navy);font-family:var(--display);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;}
+.uname{font-size:12px;color:#fff;}
+
+/* ── ALERT BANNER ── */
+#alert-banner{overflow:hidden;max-height:0;transition:max-height .3s,padding .3s;}
+#alert-banner.show{max-height:56px;padding:10px 28px;}
+#alert-banner.crit{background:#FFF5F5;border-bottom:2px solid var(--red);}
+#alert-banner.warn{background:#FFFBEB;border-bottom:2px solid var(--yellow);}
+#alert-banner.ok{background:#F0FFF4;border-bottom:2px solid var(--teal);}
+.alert-row{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:14px;color:var(--navy);}
+
+/* ── MAIN LAYOUT ── */
+main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
+
+/* ── FILTERS BAR ── */
+.filter-bar{background:var(--card);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow);margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.filter-bar label{font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.filter-select,.filter-input{padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:12px;color:var(--navy);background:#fff;cursor:pointer;font-family:var(--body);}
+.filter-select:focus,.filter-input:focus{outline:none;border-color:var(--navy);}
+.filter-sep{width:1px;height:28px;background:var(--border);}
+.btn-apply{background:var(--navy);color:#fff;border:none;border-radius:5px;padding:7px 16px;font-family:var(--display);font-weight:700;font-size:12px;cursor:pointer;}
+.btn-apply:hover{background:#1a2a6e;}
+.btn-reset{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:7px 12px;font-size:12px;cursor:pointer;}
+
+/* ── ISLAND TABS ── */
+.island-tabs{display:flex;gap:4px;margin-bottom:16px;background:var(--card);border-radius:var(--radius);padding:4px;box-shadow:var(--shadow);width:fit-content;}
+.itab{padding:7px 18px;border-radius:5px;border:none;font-family:var(--display);font-weight:700;font-size:13px;cursor:pointer;background:transparent;color:var(--muted);}
+.itab.active{background:var(--navy);color:#fff;}
+.itab.pending{color:var(--border);cursor:not-allowed;}
+.itab .pending-badge{font-size:9px;background:var(--yellow);color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:800;}
+
+/* ── ISLAND SECTION ── */
+.island-section{display:none;}
+.island-section.active{display:block;}
+
+/* ── KPI CARDS ── */
+.kpi-row{display:flex;flex-direction:column;gap:10px;margin-bottom:18px;}
+.kpi-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;}
+.kpi-metrics-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;}
+.kpi{background:var(--card);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);border-left:3px solid var(--teal);}
+.kpi.warn{border-left-color:var(--yellow);}
+.kpi.crit{border-left-color:var(--red);}
+.kpi.info{border-left-color:var(--blue);}
+.kpi.purple{border-left-color:var(--purple);}
+.kpi.lime{border-left-color:var(--lime);}
+.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600;margin-bottom:4px;}
+.kpi-value{font-family:var(--display);font-weight:800;font-size:26px;color:var(--navy);line-height:1;}
+.kpi-value.small{font-size:20px;}
+.kpi-sub{font-size:10px;color:var(--muted);margin-top:3px;}
+.kpi-sm{background:var(--card);border-radius:var(--radius);padding:10px 13px;box-shadow:var(--shadow);border-top:2px solid var(--border);}
+.kpi-sm.pos{border-top-color:var(--teal);}
+.kpi-sm.neg{border-top-color:var(--red);}
+.kpi-sm.neu{border-top-color:var(--blue);}
+.kpi-sm.gold{border-top-color:var(--yellow);}
+.kpi-sm-label{font-size:9px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);font-weight:600;margin-bottom:3px;}
+.kpi-sm-value{font-family:var(--display);font-weight:800;font-size:18px;color:var(--navy);line-height:1;}
+.kpi-sm-value.small{font-size:14px;}
+.kpi-sm-sub{font-size:9px;color:var(--muted);margin-top:2px;}
+
+/* ── CHART GRID ── */
+.chart-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.chart-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+.chart-grid-full{margin-bottom:14px;}
+.chart-card{background:var(--card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.chart-title{font-family:var(--display);font-weight:700;font-size:15px;color:var(--navy);}
+.chart-sub{font-size:10px;color:var(--muted);margin-top:1px;}
+.chart-badge{font-family:var(--display);font-weight:700;font-size:9px;padding:2px 8px;border-radius:10px;background:rgba(0,181,128,.1);color:var(--teal);}
+.chart-badge.warn{background:rgba(214,158,46,.1);color:var(--yellow);}
+.chart-badge.alert{background:rgba(229,62,62,.1);color:var(--red);}
+.chart-wrap{position:relative;height:240px;}
+.chart-wrap.tall{height:300px;}
+.chart-wrap.pie{height:280px;}
+
+/* ── PROJECTION TABLE ── */
+.proj-table{width:100%;border-collapse:collapse;font-size:12px;}
+.proj-table th{background:var(--navy);color:#fff;font-family:var(--display);font-weight:700;font-size:11px;padding:7px 10px;text-align:left;}
+.proj-table td{padding:7px 10px;border-bottom:1px solid var(--border);}
+.proj-table tr:last-child td{border-bottom:none;}
+.proj-table tr:nth-child(even) td{background:#F8F9FB;}
+.proj-table .val{font-family:var(--display);font-weight:700;font-size:13px;}
+.proj-table .delta-pos{color:var(--teal);}
+.proj-table .delta-neg{color:var(--red);}
+.alert-tag{display:inline-block;background:rgba(229,62,62,.12);color:var(--red);font-family:var(--display);font-weight:800;font-size:9px;padding:2px 7px;border-radius:8px;}
+.ok-tag{display:inline-block;background:rgba(0,181,128,.12);color:var(--teal);font-family:var(--display);font-weight:800;font-size:9px;padding:2px 7px;border-radius:8px;}
+
+/* ── PENDING CARD ── */
+.pending-card{background:var(--card);border-radius:var(--radius);padding:60px 40px;text-align:center;box-shadow:var(--shadow);}
+.pending-icon{font-size:48px;margin-bottom:16px;}
+.pending-title{font-family:var(--display);font-weight:700;font-size:22px;color:var(--navy);margin-bottom:8px;}
+.pending-sub{font-size:13px;color:var(--muted);line-height:1.7;}
+
+/* ── LOADING OVERLAY ── */
+#loading{display:none;position:fixed;inset:0;background:rgba(16,27,70,.5);z-index:999;align-items:center;justify-content:center;}
+#loading.show{display:flex;}
+.spinner{width:52px;height:52px;border:4px solid rgba(194,213,0,.3);border-top:4px solid var(--lime);border-radius:50%;animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-text{color:#fff;font-family:var(--display);font-weight:700;font-size:16px;margin-top:14px;letter-spacing:1px;}
+
+/* ── COVERAGE METER ── */
+.coverage-bar{height:8px;background:var(--border);border-radius:4px;margin-top:4px;overflow:hidden;}
+.coverage-fill{height:100%;border-radius:4px;transition:width .6s;}
+
+/* ── RESPONSIVE ── */
+@media(max-width:1400px){
+  .kpi-grid{grid-template-columns:repeat(3,1fr);}
+  .kpi-metrics-grid{grid-template-columns:repeat(3,1fr);}
+}
+@media(max-width:1200px){
+  .kpi-grid{grid-template-columns:repeat(3,1fr);}
+  .kpi-metrics-grid{grid-template-columns:repeat(3,1fr);}
+  .chart-grid-3{grid-template-columns:1fr 1fr;}
+}
+@media(max-width:768px){
+  .kpi-grid,.kpi-metrics-grid{grid-template-columns:1fr 1fr;}
+  .chart-grid-2,.chart-grid-3{grid-template-columns:1fr;}
+  main{padding:14px 14px;}
+}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loading">
+  <div style="text-align:center;">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loading-text">Loading…</div>
+  </div>
+</div>
+
+<!-- SETUP SCREEN -->
+<div id="setup-screen">
+  <div class="setup-card">
+    <div class="setup-logo">ARGOS</div>
+    <div class="setup-title">Configuration Required</div>
+    <div class="setup-sub">Before using the dashboard, configure the Flow URL in <code>config.js</code>.</div>
+    <div class="setup-step"><div class="setup-n">1</div><div class="setup-t">Go to <strong>make.powerautomate.com</strong> → flow <strong>ARGOS Get Operations Data</strong></div></div>
+    <div class="setup-step"><div class="setup-n">2</div><div class="setup-t">Click the trigger → copy <strong>HTTP POST URL</strong></div></div>
+    <div class="setup-step"><div class="setup-n">3</div><div class="setup-t">Paste in <code>config.js</code> → field <code>FLOW_URL</code></div></div>
+    <div class="setup-step"><div class="setup-n">4</div><div class="setup-t">Reload this page</div></div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">ARGOS</div>
+    <div class="login-tag">OPERATIONS INTELLIGENCE</div>
+    <div class="login-div"></div>
+    <div class="login-title">VP RCCA Caribbean Terminals</div>
+    <div class="login-sub">Financial operations dashboard · Inventory · Sales · Costs</div>
+    <div class="isle-grid">
+      <div class="isle-chip"><strong>SXM</strong><span>Saint Maarten</span></div>
+      <div class="isle-chip"><strong>USVI</strong><span>Saint Thomas</span></div>
+      <div class="isle-chip" style="border-left-color:var(--yellow);"><strong>ANU</strong><span>Antigua</span></div>
+      <div class="isle-chip" style="border-left-color:var(--yellow);"><strong>DOM</strong><span>Dominica</span></div>
+    </div>
+    <div class="name-row">
+      <input id="user-name" class="name-input" type="text" placeholder="Your name (e.g. Maria Lopez)" maxlength="40">
+      <button class="btn-enter" onclick="doLogin()">Enter</button>
+    </div>
+    <div class="login-note">Data is retrieved directly from SharePoint via Power Automate.<br>No credentials are stored locally.</div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <header>
+    <div class="h-logo">ARGOS<span>OPERATIONS INTELLIGENCE</span></div>
+    <div class="h-right">
+      <div class="pulse-row"><div class="pulse"></div><span id="last-update-txt">Loading…</span></div>
+      <button class="hbtn" onclick="refreshData()">↻ Refresh</button>
+      <button class="hbtn" onclick="generateReport()" style="border-color:rgba(194,213,0,.4);color:rgba(194,213,0,.9);">↓ Report</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="avatar" id="header-avatar">?</div>
+        <span class="uname" id="header-name"></span>
+        <button class="hbtn" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="alert-banner">
+    <div class="alert-row" id="alert-text"></div>
+  </div>
+
+  <main>
+    <!-- FILTERS -->
+    <div class="filter-bar">
+      <label>Island</label>
+      <select id="f-island" class="filter-select" onchange="applyFilters()">
+        <option value="SXM">SXM — Saint Maarten</option>
+        <option value="USVI">USVI — Saint Thomas</option>
+        <option value="ANU">ANU — Antigua</option>
+        <option value="DOM">DOM — Dominica</option>
+      </select>
+      <div class="filter-sep"></div>
+      <label>Year</label>
+      <select id="f-year" class="filter-select" onchange="onYearChange()">
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+      </select>
+      <div class="filter-sep"></div>
+      <label>From Month</label>
+      <select id="f-month-from" class="filter-select" onchange="applyFilters()">
+        <option value="1">January</option><option value="2">February</option>
+        <option value="3">March</option><option value="4">April</option>
+        <option value="5">May</option><option value="6">June</option>
+        <option value="7">July</option><option value="8">August</option>
+        <option value="9">September</option><option value="10">October</option>
+        <option value="11">November</option><option value="12">December</option>
+      </select>
+      <label>To</label>
+      <select id="f-month-to" class="filter-select" onchange="applyFilters()">
+        <option value="1">January</option><option value="2">February</option>
+        <option value="3">March</option><option value="4">April</option>
+        <option value="5">May</option><option value="6">June</option>
+        <option value="7">July</option><option value="8">August</option>
+        <option value="9">September</option><option value="10">October</option>
+        <option value="11">November</option><option value="12">December</option>
+      </select>
+      <div class="filter-sep"></div>
+      <label>Product</label>
+      <select id="f-product" class="filter-select" onchange="applyFilters()">
+        <option value="all">All Products</option>
+        <option value="localBulk">Local Bulk</option>
+        <option value="exportBulk">Export Bulk</option>
+        <option value="local21kg">Local 21kg</option>
+        <option value="export21kg">Export 21kg</option>
+        <option value="local15mt">Local 1.5 MT</option>
+        <option value="export15mt">Export 1.5 MT</option>
+        <option value="otherType">Other Type</option>
+      </select>
+      <button class="btn-reset" onclick="resetFilters()">Reset</button>
+    </div>
+
+    <!-- ISLAND TABS -->
+    <div class="island-tabs">
+      <button class="itab active" id="tab-SXM" onclick="switchIsland('SXM')">SXM</button>
+      <button class="itab" id="tab-USVI" onclick="switchIsland('USVI')">USVI</button>
+      <button class="itab" id="tab-ANU" onclick="switchIsland('ANU')">ANU</button>
+      <button class="itab" id="tab-DOM" onclick="switchIsland('DOM')">DOM</button>
+    </div>
+
+    <!-- SXM SECTION -->
+    <div id="section-SXM" class="island-section active">
+      <div class="kpi-row" id="kpi-SXM"></div>
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Monthly Inventory</div><div class="chart-sub">Metric tons · up to current month</div></div>
+            <span class="chart-badge" id="inv-badge-SXM">MT</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-inv-SXM"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Import Costs — CIF Cost</div><div class="chart-sub">USD/MT monthly</div></div>
+            <span class="chart-badge info">USD/MT</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-cif-SXM"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Import Cost</div><div class="chart-sub">Monthly import cost</div></div>
+            <span class="chart-badge" style="background:rgba(107,70,193,.1);color:var(--purple);">USD/MT</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-import-SXM"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Total Sales — Trend</div><div class="chart-sub">MT/day monthly cumulative</div></div>
+            <span class="chart-badge">Trend</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-sales-line-SXM"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Monthly Sales Mix</div><div class="chart-sub">Distribution by product type</div></div>
+            <span class="chart-badge">Comparative</span>
+          </div>
+          <div class="chart-wrap pie"><canvas id="chart-pie-SXM"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Sales by Product</div><div class="chart-sub">MT/day by type · monthly trend</div></div>
+            <span class="chart-badge">By Product</span>
+          </div>
+          <div class="chart-wrap pie"><canvas id="chart-products-SXM"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-full">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Sales Projections</div><div class="chart-sub" id="proj-sub-SXM">Linear regression — total &amp; product sales · next month</div></div>
+            <span class="chart-badge warn">Projection</span>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chart-proj-SXM"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-full">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Daily Sales Movement</div><div class="chart-sub">MT/day · individual daily transactions</div></div>
+            <span class="chart-badge" style="background:rgba(0,181,128,.1);color:var(--teal);">Daily</span>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chart-daily-SXM"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-card" style="margin-bottom:14px;">
+        <div class="chart-header">
+          <div><div class="chart-title">Projections &amp; Coverage Table</div><div class="chart-sub">Inventory vs projected sales · Alert if coverage &lt; 50 MT</div></div>
+        </div>
+        <div id="proj-table-SXM"></div>
+      </div>
+    </div>
+
+    <!-- USVI SECTION -->
+    <div id="section-USVI" class="island-section">
+      <div class="kpi-row" id="kpi-USVI"></div>
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Monthly Inventory</div><div class="chart-sub">Metric tons · up to current month</div></div>
+            <span class="chart-badge" id="inv-badge-USVI">MT</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-inv-USVI"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Import Costs — CIF Cost</div><div class="chart-sub">USD/MT monthly</div></div>
+            <span class="chart-badge info">USD/MT</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-cif-USVI"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Import Cost</div><div class="chart-sub">Monthly import cost</div></div>
+            <span class="chart-badge" style="background:rgba(107,70,193,.1);color:var(--purple);">USD/MT</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-import-USVI"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Total Sales — Trend</div><div class="chart-sub">MT/day monthly cumulative</div></div>
+            <span class="chart-badge">Trend</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-sales-line-USVI"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Monthly Sales Mix</div><div class="chart-sub">Distribution by product type</div></div>
+            <span class="chart-badge">Comparative</span>
+          </div>
+          <div class="chart-wrap pie"><canvas id="chart-pie-USVI"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Sales by Product</div><div class="chart-sub">MT/day by type · monthly trend</div></div>
+            <span class="chart-badge">By Product</span>
+          </div>
+          <div class="chart-wrap pie"><canvas id="chart-products-USVI"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-full">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Sales Projections</div><div class="chart-sub" id="proj-sub-USVI">Linear regression · next month</div></div>
+            <span class="chart-badge warn">Projection</span>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chart-proj-USVI"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-grid-full">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Daily Sales Movement</div><div class="chart-sub">MT/day · individual daily transactions</div></div>
+            <span class="chart-badge" style="background:rgba(0,181,128,.1);color:var(--teal);">Daily</span>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chart-daily-USVI"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-card" style="margin-bottom:14px;">
+        <div class="chart-header">
+          <div><div class="chart-title">Projections &amp; Coverage Table</div><div class="chart-sub">Inventory vs projected sales · Alert if coverage &lt; 50 MT</div></div>
+        </div>
+        <div id="proj-table-USVI"></div>
+      </div>
+    </div>
+
+    <!-- ANU SECTION -->
+    <div id="section-ANU" class="island-section">
+      <div id="pending-ANU" class="pending-card">
+        <div class="pending-icon">📂</div>
+        <div class="pending-title">ANU — Antigua &amp; Barbuda</div>
+        <div class="pending-sub">No file — No data available for this terminal in the selected period.<br>The dashboard will activate automatically when data is loaded.</div>
+      </div>
+      <div id="charts-ANU" style="display:none;">
+        <div class="kpi-row" id="kpi-ANU"></div>
+        <div class="chart-grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Monthly Inventory</div><div class="chart-sub">Metric tons · up to current month</div></div>
+              <span class="chart-badge" id="inv-badge-ANU">MT</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-inv-ANU"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Import Costs — CIF Cost</div><div class="chart-sub">USD/MT monthly</div></div>
+              <span class="chart-badge info">USD/MT</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-cif-ANU"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Import Cost</div><div class="chart-sub">Monthly import cost</div></div>
+              <span class="chart-badge" style="background:rgba(107,70,193,.1);color:var(--purple);">USD/MT</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-import-ANU"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Total Sales — Trend</div><div class="chart-sub">MT/day monthly cumulative</div></div>
+              <span class="chart-badge">Trend</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-sales-line-ANU"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Monthly Sales Mix</div><div class="chart-sub">Distribution by product type</div></div>
+              <span class="chart-badge">Comparative</span>
+            </div>
+            <div class="chart-wrap pie"><canvas id="chart-pie-ANU"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Sales by Product</div><div class="chart-sub">MT/day by type · monthly trend</div></div>
+              <span class="chart-badge">By Product</span>
+            </div>
+            <div class="chart-wrap pie"><canvas id="chart-products-ANU"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-full">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Sales Projections</div><div class="chart-sub" id="proj-sub-ANU">Linear regression · next month</div></div>
+              <span class="chart-badge warn">Projection</span>
+            </div>
+            <div class="chart-wrap tall"><canvas id="chart-proj-ANU"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-full">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Daily Sales Movement</div><div class="chart-sub">MT/day · individual daily transactions</div></div>
+              <span class="chart-badge" style="background:rgba(0,181,128,.1);color:var(--teal);">Daily</span>
+            </div>
+            <div class="chart-wrap tall"><canvas id="chart-daily-ANU"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-card" style="margin-bottom:14px;">
+          <div class="chart-header">
+            <div><div class="chart-title">Projections &amp; Coverage Table</div><div class="chart-sub">Inventory vs projected sales · Alert if coverage &lt; 50 MT</div></div>
+          </div>
+          <div id="proj-table-ANU"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOM SECTION -->
+    <div id="section-DOM" class="island-section">
+      <div id="pending-DOM" class="pending-card">
+        <div class="pending-icon">📂</div>
+        <div class="pending-title">DOM — Dominica</div>
+        <div class="pending-sub">No file — No data available for this terminal in the selected period.<br>The dashboard will activate automatically when data is loaded.</div>
+      </div>
+      <div id="charts-DOM" style="display:none;">
+        <div class="kpi-row" id="kpi-DOM"></div>
+        <div class="chart-grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Monthly Inventory</div><div class="chart-sub">Metric tons · up to current month</div></div>
+              <span class="chart-badge" id="inv-badge-DOM">MT</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-inv-DOM"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Import Costs — CIF Cost</div><div class="chart-sub">USD/MT monthly</div></div>
+              <span class="chart-badge info">USD/MT</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-cif-DOM"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Import Cost</div><div class="chart-sub">Monthly import cost</div></div>
+              <span class="chart-badge" style="background:rgba(107,70,193,.1);color:var(--purple);">USD/MT</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-import-DOM"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Total Sales — Trend</div><div class="chart-sub">MT/day monthly cumulative</div></div>
+              <span class="chart-badge">Trend</span>
+            </div>
+            <div class="chart-wrap"><canvas id="chart-sales-line-DOM"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Monthly Sales Mix</div><div class="chart-sub">Distribution by product type</div></div>
+              <span class="chart-badge">Comparative</span>
+            </div>
+            <div class="chart-wrap pie"><canvas id="chart-pie-DOM"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Sales by Product</div><div class="chart-sub">MT/day by type · monthly trend</div></div>
+              <span class="chart-badge">By Product</span>
+            </div>
+            <div class="chart-wrap pie"><canvas id="chart-products-DOM"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-full">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Sales Projections</div><div class="chart-sub" id="proj-sub-DOM">Linear regression · next month</div></div>
+              <span class="chart-badge warn">Projection</span>
+            </div>
+            <div class="chart-wrap tall"><canvas id="chart-proj-DOM"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-grid-full">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Daily Sales Movement</div><div class="chart-sub">MT/day · individual daily transactions</div></div>
+              <span class="chart-badge" style="background:rgba(0,181,128,.1);color:var(--teal);">Daily</span>
+            </div>
+            <div class="chart-wrap tall"><canvas id="chart-daily-DOM"></canvas></div>
+          </div>
+        </div>
+        <div class="chart-card" style="margin-bottom:14px;">
+          <div class="chart-header">
+            <div><div class="chart-title">Projections &amp; Coverage Table</div><div class="chart-sub">Inventory vs projected sales · Alert if coverage &lt; 50 MT</div></div>
+          </div>
+          <div id="proj-table-DOM"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- PRINT REPORT OVERLAY -->
+<div id="print-overlay"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  CONSTANTS & STATE
+// ═══════════════════════════════════════════════════════════════════
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+const MONTH_NAMES_EN = ['January','February','March','April','May','June',
+                        'July','August','September','October','November','December'];
+const PRODUCTS = ['localBulk','exportBulk','local21kg','export21kg','local15mt','export15mt','otherType'];
+const PRODUCT_LABELS = {'localBulk':'Local Bulk','exportBulk':'Export Bulk','local21kg':'Local 21kg',
+                        'export21kg':'Export 21kg','local15mt':'Local 1.5MT','export15mt':'Export 1.5MT','otherType':'Other'};
+const PRODUCT_COLORS = {'localBulk':'#101B46','exportBulk':'#00B580','local21kg':'#C2D500',
+                        'export21kg':'#3182CE','local15mt':'#D69E2E','export15mt':'#6B46C1','otherType':'#718096'};
+const ALERT_THRESHOLD = 50; // MT
+
+const STATE = {
+  rawData: null,
+  activeIsland: 'SXM',
+  filters: { year: 2026, monthFrom: 1, monthTo: 12, product: 'all' },
+  charts: {}
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  if (!ARGOS_CONFIG.isConfigured) {
+    document.getElementById('setup-screen').classList.add('show');
+    return;
+  }
+  const saved = sessionStorage.getItem('argos_user');
+  if (saved) { startApp(saved); }
+  else { document.getElementById('login-screen').classList.add('show'); }
+
+  window.addEventListener('afterprint', () => {
+    document.getElementById('print-overlay').style.display = 'none';
+  });
+
+  // set default month filter to current month
+  const now = new Date();
+  document.getElementById('f-year').value = now.getFullYear();
+  document.getElementById('f-month-from').value = 1;
+  document.getElementById('f-month-to').value = now.getMonth() + 1;
+  STATE.filters.year = now.getFullYear();
+  STATE.filters.monthTo = now.getMonth() + 1;
+});
+
+function doLogin() {
+  const n = document.getElementById('user-name').value.trim() || 'User';
+  sessionStorage.setItem('argos_user', n);
+  document.getElementById('login-screen').classList.remove('show');
+  startApp(n);
+}
+
+function doLogout() {
+  sessionStorage.removeItem('argos_user');
+  document.getElementById('app').classList.remove('show');
+  document.getElementById('login-screen').classList.add('show');
+}
+
+function startApp(name) {
+  document.getElementById('app').classList.add('show');
+  document.getElementById('header-name').textContent = name;
+  document.getElementById('header-avatar').textContent = name.charAt(0).toUpperCase();
+  refreshData();
+  setInterval(refreshData, (ARGOS_CONFIG.REFRESH_MINUTES || 30) * 60 * 1000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  DATA FETCH
+// ═══════════════════════════════════════════════════════════════════
+async function refreshData() {
+  showLoading('Querying SharePoint…');
+  try {
+    const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'getData', fromYear: 2025, islands: ['ANU','DOM','SXM','USVI'] })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    STATE.rawData = json;
+    const ts = json.lastUpdated ? new Date(json.lastUpdated).toLocaleString('en') : 'now';
+    document.getElementById('last-update-txt').textContent = 'Updated: ' + ts;
+    applyFilters();
+  } catch(e) {
+    showError('Error loading data: ' + e.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  FILTERS
+// ═══════════════════════════════════════════════════════════════════
+// Called only when the year dropdown changes — auto-resets months for past years
+function onYearChange() {
+  const selectedYear = parseInt(document.getElementById('f-year').value);
+  const currentYear  = new Date().getFullYear();
+  if (selectedYear < currentYear) {
+    document.getElementById('f-month-from').value = 1;
+    document.getElementById('f-month-to').value   = 12;
+  } else {
+    document.getElementById('f-month-from').value = 1;
+    document.getElementById('f-month-to').value   = new Date().getMonth() + 1;
+  }
+  applyFilters();
+}
+
+function applyFilters() {
+  STATE.filters.year      = parseInt(document.getElementById('f-year').value);
+  STATE.filters.monthFrom = parseInt(document.getElementById('f-month-from').value);
+  STATE.filters.monthTo   = parseInt(document.getElementById('f-month-to').value);
+  STATE.filters.product   = document.getElementById('f-product').value;
+  const island = document.getElementById('f-island').value;
+  if (island !== STATE.activeIsland) switchIsland(island);
+  if (STATE.rawData) renderIsland(STATE.activeIsland);
+}
+
+function resetFilters() {
+  const now = new Date();
+  document.getElementById('f-year').value = now.getFullYear();
+  document.getElementById('f-month-from').value = 1;
+  document.getElementById('f-month-to').value = now.getMonth() + 1;
+  document.getElementById('f-product').value = 'all';
+  applyFilters();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  ISLAND SWITCH
+// ═══════════════════════════════════════════════════════════════════
+function switchIsland(id) {
+  STATE.activeIsland = id;
+  document.querySelectorAll('.island-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.itab').forEach(t => t.classList.remove('active'));
+  document.getElementById('section-' + id).classList.add('active');
+  document.getElementById('tab-' + id).classList.add('active');
+  document.getElementById('f-island').value = id;
+  if (STATE.rawData) renderIsland(id);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RENDER ISLAND
+// ═══════════════════════════════════════════════════════════════════
+function renderIsland(id) {
+  const islands = STATE.rawData?.islands;
+  if (!islands || !islands[id]) {
+    renderPending(id);
+    return;
+  }
+  const raw = islands[id];
+  if (!raw || raw.error) { renderPending(id); return; }
+
+  const { year, monthFrom, monthTo, product } = STATE.filters;
+
+  // Normalize raw Excel column names → internal field names, filtered by island Terminal column
+  const normalized = normalizeIslandData(raw, year, id);
+
+  // For islands with conditional chart sections (ANU/DOM): show charts or pending card
+  const pendingEl = document.getElementById('pending-' + id);
+  const chartsEl  = document.getElementById('charts-' + id);
+  if (pendingEl && chartsEl) {
+    const hasData = normalized.sales.length > 0 || normalized.inventory.length > 0 || normalized.aveCost.length > 0;
+    pendingEl.style.display = hasData ? 'none' : 'block';
+    chartsEl.style.display  = hasData ? 'block' : 'none';
+    if (!hasData) return;
+  }
+
+  // Filter inventory by year and month range
+  const inv = filterInventory(normalized.inventory, year, monthFrom, monthTo);
+  // Filter aveCost by year and month range
+  const cost = filterCost(normalized.aveCost, year, monthFrom, monthTo);
+  // Aggregate sales by month (filtered)
+  const salesMonthly = aggregateSalesMonthly(normalized.sales, year, monthFrom, monthTo);
+
+  renderKPIs(id, inv, cost, salesMonthly, raw);
+  renderInventoryChart(id, inv);
+  renderCIFChart(id, cost);
+  renderImportChart(id, cost);
+  renderSalesLineChart(id, salesMonthly, product);
+  renderSalesPieChart(id, salesMonthly);
+  renderProductsChart(id, salesMonthly);
+  renderProjectionsChart(id, salesMonthly, product);
+  renderDailySalesChart(id, normalized.sales, year, monthFrom, monthTo);
+  renderProjTable(id, inv, salesMonthly);
+  renderAlertBanner(id, inv, salesMonthly);
+}
+
+function renderPending(id) {
+  // section already shows pending card by default for ANU/DOM
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RAW COLUMN NAME NORMALIZATION
+//  Power Automate "List rows" returns raw Excel column names.
+//  These functions convert them to the internal field names used
+//  throughout the dashboard.
+// ═══════════════════════════════════════════════════════════════════
+const MONTH_NUM_MAP = {
+  January:1, February:2, March:3, April:4, May:5, June:6,
+  July:7, August:8, September:9, October:10, November:11, December:12
+};
+
+function parseDayMonth(raw, year) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const s = String(raw).trim();
+
+  // "D-M" or "D/M" format (e.g. "7-1" = Jan 7)
+  const m = s.match(/^(\d{1,2})[-\/](\d{1,2})$/);
+  if (m) {
+    const day = parseInt(m[1]), month = parseInt(m[2]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31)
+      return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+
+  // Excel serial date (e.g. 46023 = Jan 1, 2026)
+  const num = parseFloat(s);
+  if (!isNaN(num) && num > 40000 && num < 70000) {
+    const ms = Math.round((num - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  // ISO or common string
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  return null;
+}
+
+function normalizeIslandData(raw, year, islandId) {
+  const pf = v => { const n = parseFloat(String(v ?? '').replace(/,/g,'')); return isNaN(n) ? 0 : n; };
+  const pi = v => { const n = parseInt(String(v ?? '')); return isNaN(n) ? 0 : n; };
+
+  // Flexible key lookup: finds a key ignoring leading/trailing spaces and case
+  const getVal = (obj, candidates) => {
+    const keys = Object.keys(obj);
+    for (const c of candidates) {
+      const cu = c.trim().toUpperCase();
+      const found = keys.find(k => k.trim().toUpperCase() === cu);
+      if (found !== undefined && obj[found] !== undefined && obj[found] !== '') return obj[found];
+    }
+    return undefined;
+  };
+
+  // Read the Year column added to each Excel table row ('Column1' is the actual PA column name)
+  const rowYear = r => pi(getVal(r, ['Column1','Year','YEAR','Año','AÑO','year','año','column1'])) || year;
+
+  // Terminal filter: include rows matching the active island.
+  // Fallback: if filtering removes ALL rows from a non-empty array, use all rows
+  // (handles Excel files where Terminal column hasn't been updated per island yet)
+  const KNOWN_ISLANDS = ['ANU','DOM','SXM','USVI'];
+  const terminalOk = r => {
+    const t = getVal(r, ['Terminal','TERMINAL','terminal']);
+    if (t === undefined || t === null) return true; // no Terminal column → include all
+    const tv = String(t).trim().toUpperCase();
+    if (tv === '') return true; // empty value → include all
+    // Only filter if Terminal value is one of the known islands
+    if (!KNOWN_ISLANDS.includes(tv)) return true;
+    return tv === (islandId || '').toUpperCase();
+  };
+  const applyTerminalFilter = rows => {
+    const filtered = rows.filter(terminalOk);
+    if (filtered.length === 0 && rows.length > 0) {
+      // Only fall back to all rows if the file has NO Terminal column at all (not yet configured).
+      // If rows have Terminal values from a known island but none match ours → real mismatch → return empty.
+      const hasKnownTerminal = rows.some(r => {
+        const t = getVal(r, ['Terminal','TERMINAL','terminal']);
+        if (t === undefined || t === null) return false;
+        return KNOWN_ISLANDS.includes(String(t).trim().toUpperCase());
+      });
+      if (!hasKnownTerminal) return rows; // no Terminal column → legacy fallback
+      return [];                          // wrong island's data → show "No file"
+    }
+    return filtered;
+  };
+
+  // ── Sales: DATE = serial or "D-M" ────────────────────────────────
+  const sales = applyTerminalFilter(raw.sales || []).map(r => {
+    const dateRaw = getVal(r, ['DATE']);
+    const date = parseDayMonth(dateRaw, rowYear(r));
+    if (!date) return null;
+    const total      = pf(getVal(r, ['sales por day TOTAL']));
+    const localBulk  = pf(getVal(r, ['sales por day Local Bulk']));
+    const exportBulk = pf(getVal(r, ['sales por day Export Bulk']));
+    const local21kg  = pf(getVal(r, ['sales por day Local 21kg', 'sales por day Local 21 kg']));
+    const export21kg = pf(getVal(r, ['sales por day Export 21kg', 'sales por day Export 21 kg']));
+    const local15mt  = pf(getVal(r, ['sales por day Local 1.5 MT', 'sales por day Local 1_x002e_5 MT']));
+    const export15mt = pf(getVal(r, ['sales por day Export 1.5 MT', 'sales por day Export 1_x002e_5 MT']));
+    const otherType  = pf(r['sales por day OTHER TYPE']);
+    // Skip rows where all values are zero
+    if (total === 0 && localBulk === 0 && exportBulk === 0 &&
+        local21kg === 0 && export21kg === 0 && local15mt === 0 &&
+        export15mt === 0 && otherType === 0) return null;
+    return { date, total, localBulk, exportBulk, local21kg, export21kg, local15mt, export15mt, otherType };
+  }).filter(Boolean);
+
+  // ── Inventory: DATE = "January" … "December" ────────────────────
+  const inventory = applyTerminalFilter(raw.inventory || []).map(r => {
+    const rawDate = String(getVal(r, ['DATE']) ?? '').trim();
+    const monthNum = MONTH_NUM_MAP[rawDate];
+    if (!monthNum) return null;
+    const ry = rowYear(r);
+    const value = pf(getVal(r, ['Inventory Bulk', 'Inventory', 'INVENTORY', 'inventario']));
+    if (value <= 0) return null;
+    return { month: `${ry}-${String(monthNum).padStart(2,'0')}`, value };
+  }).filter(Boolean);
+
+  // ── AveCost: DATE = "January" … "December" ──────────────────────
+
+  const aveCost = applyTerminalFilter(raw.aveCost || []).map(r => {
+    const rawDate = String(getVal(r, ['DATE']) ?? '').trim();
+    const monthNum = MONTH_NUM_MAP[rawDate];
+    if (!monthNum) return null;
+    const ry = rowYear(r);
+    const cifCost    = pf(getVal(r, ['CIF COST', 'CIF Cost', 'CIF_COST', 'cif cost']));
+    const importCost = pf(getVal(r, ['IMPORT COST', 'IMPORT', 'Import Cost', 'import cost']));
+    if (cifCost === 0 && importCost === 0) return null;
+    return { month: `${ry}-${String(monthNum).padStart(2,'0')}`, cifCost, importCost };
+  }).filter(Boolean);
+
+  return { sales, inventory, aveCost };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  DATA HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function filterInventory(data, year, mFrom, mTo) {
+  // Deduplicate by month: multiple Excel files may contribute the same month — keep last (highest) value
+  const byMonth = {};
+  data.forEach(r => {
+    if (!r.month) return;
+    const [y, m] = r.month.split('-').map(Number);
+    if (y !== year || m < mFrom || m > mTo) return;
+    if (!byMonth[r.month] || r.value > byMonth[r.month].value) byMonth[r.month] = r;
+  });
+  return Object.values(byMonth).sort((a,b) => a.month.localeCompare(b.month));
+}
+
+function filterCost(data, year, mFrom, mTo) {
+  // Deduplicate by month: multiple Excel files may contribute the same month — keep last entry
+  const byMonth = {};
+  data.forEach(r => {
+    if (!r.month) return;
+    const [y, m] = r.month.split('-').map(Number);
+    if (y !== year || m < mFrom || m > mTo) return;
+    byMonth[r.month] = r;
+  });
+  return Object.values(byMonth).sort((a,b) => a.month.localeCompare(b.month));
+}
+
+function aggregateSalesMonthly(dailySales, year, mFrom, mTo) {
+  const byMonth = {};
+  dailySales.forEach(r => {
+    if (!r.date) return;
+    const [y, m] = r.date.split('-').map(Number);
+    if (y !== year || m < mFrom || m > mTo) return;
+    const key = `${y}-${String(m).padStart(2,'0')}`;
+    if (!byMonth[key]) byMonth[key] = { month: key, total:0, localBulk:0, exportBulk:0, local21kg:0, export21kg:0, local15mt:0, export15mt:0, otherType:0, days:0 };
+    byMonth[key].total      += r.total      || 0;
+    byMonth[key].localBulk  += r.localBulk  || 0;
+    byMonth[key].exportBulk += r.exportBulk || 0;
+    byMonth[key].local21kg  += r.local21kg  || 0;
+    byMonth[key].export21kg += r.export21kg || 0;
+    byMonth[key].local15mt  += r.local15mt  || 0;
+    byMonth[key].export15mt += r.export15mt || 0;
+    byMonth[key].otherType  += r.otherType  || 0;
+    byMonth[key].days++;
+  });
+  return Object.values(byMonth).sort((a,b) => a.month.localeCompare(b.month));
+}
+
+function monthLabel(key) {
+  const [,m] = key.split('-').map(Number);
+  return MONTH_NAMES[m-1];
+}
+
+// Linear regression → returns {slope, intercept}
+function linReg(yVals) {
+  const n = yVals.length;
+  if (n < 2) return { slope: 0, intercept: yVals[0] || 0 };
+  const xs = yVals.map((_,i) => i);
+  const mx = (n-1)/2;
+  const my = yVals.reduce((a,b)=>a+b,0)/n;
+  const num = xs.reduce((s,x,i)=>s+(x-mx)*(yVals[i]-my),0);
+  const den = xs.reduce((s,x)=>s+(x-mx)**2,0);
+  const slope = den === 0 ? 0 : num/den;
+  return { slope, intercept: my - slope*mx };
+}
+
+function project(reg, fromIdx, count) {
+  return Array.from({length:count},(_,i)=>Math.max(0,reg.slope*(fromIdx+i)+reg.intercept));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ADVANCED FORECASTING ENGINE
+//  Analista Financiero — Metodologías:
+//    · Holt-Winters Triple Exponential Smoothing (trend + seasonality)
+//    · Holt Linear (trend + level)
+//    · Seasonal Decomposition (monthly indices)
+//    · Ensemble weighted forecast with confidence intervals (±1.5σ)
+//    · Day-of-week daily forecast for 14-day horizon
+//  Mínimo recomendado: 7 meses de historia para proyecciones fiables
+// ═══════════════════════════════════════════════════════════════════
+
+function holtLinear(data, alpha=0.4, beta=0.15) {
+  if (data.length < 2) return { fitted: data.slice(), slope: 0, level: data[data.length-1]||0 };
+  let l = data[0], b = data[1] - data[0];
+  const fitted = [];
+  for (const v of data) {
+    const lp=l, bp=b;
+    l = alpha*v + (1-alpha)*(lp+bp);
+    b = beta*(l-lp) + (1-beta)*bp;
+    fitted.push(lp+bp);
+  }
+  return { fitted, slope:b, level:l };
+}
+
+function holtWinters(data, alpha=0.4, beta=0.1, gamma=0.3, period=12) {
+  const n = data.length;
+  if (n < period*2) return null;
+  // Seasonal init: average of first two full cycles
+  const s = [];
+  let avg1=0, avg2=0;
+  for(let j=0; j<period; j++) avg1 += data[j]/period;
+  for(let j=period; j<period*2; j++) avg2 += data[j]/period;
+  for(let i=0; i<period; i++) s[i] = ((data[i]/(avg1||1))+(data[i+period]/(avg2||1)))/2;
+  let l = avg1;
+  let b = 0;
+  for(let i=0; i<period; i++) b += (data[i+period]-data[i])/(period*period);
+  const fitted=[];
+  for(let i=0; i<n; i++) {
+    const m=i%period, pl=l, pb=b, ps=s[m];
+    l = alpha*(data[i]/(ps||1))+(1-alpha)*(pl+pb);
+    b = beta*(l-pl)+(1-beta)*pb;
+    s[m] = gamma*(data[i]/(l||1))+(1-gamma)*ps;
+    fitted.push((pl+pb)*(ps||1));
+  }
+  const forecast = h => Math.max(0, (l+b*h)*(s[(n-1+h)%period]||1));
+  const mape = fitted.reduce((sum,f,i)=>sum+Math.abs((data[i]-f)/Math.max(1,Math.abs(data[i]))),0)/n;
+  return { fitted, forecast, mape };
+}
+
+function computeSeasonalIndices(monthlySales) {
+  const byM={}, cntM={};
+  const overall = monthlySales.length ? monthlySales.reduce((s,r)=>s+r.total,0)/monthlySales.length : 1;
+  monthlySales.forEach(r => {
+    const m = parseInt(r.month.split('-')[1]);
+    byM[m]=(byM[m]||0)+r.total; cntM[m]=(cntM[m]||0)+1;
+  });
+  const idx={};
+  for(const m in byM) idx[m] = overall>0 ? (byM[m]/cntM[m])/overall : 1;
+  return idx;
+}
+
+// ensembleForecast: weighted blend of Holt-Winters + Holt + LinReg + Seasonal
+// Returns { ensemble:[{point,low,high,month}], mape, model, hasEnoughData }
+function ensembleForecast(monthlySales, monthsAhead=1) {
+  const MIN_MONTHS = 7;
+  if (!monthlySales || monthlySales.length < 3) return null;
+  const vals = monthlySales.map(r=>r.total);
+  const n = vals.length;
+  const hasEnoughData = n >= MIN_MONTHS;
+  const lastKey = monthlySales[n-1].month;
+  const [lY, lM] = lastKey.split('-').map(Number);
+
+  const reg = linReg(vals);
+  const holt = holtLinear(vals, 0.4, 0.15);
+  const hw = n>=12 ? holtWinters(vals,0.4,0.1,0.3,12) : null;
+  const seasonIdx = computeSeasonalIndices(monthlySales);
+
+  // Volatility: std of residuals from last 6 months
+  const recent = vals.slice(-Math.min(6,n));
+  const rMean = recent.reduce((a,b)=>a+b,0)/recent.length;
+  const std = Math.sqrt(recent.reduce((s,v)=>s+(v-rMean)**2,0)/recent.length)||rMean*0.15;
+
+  const W = hw ? {lin:0.20,holt:0.25,hw:0.55} : (hasEnoughData ? {lin:0.35,holt:0.65,hw:0} : {lin:0.45,holt:0.55,hw:0});
+
+  const ensemble=[];
+  for(let i=0; i<monthsAhead; i++) {
+    const rawM = lM+i+1;
+    const nm = ((rawM-1)%12)+1;
+    const ny = lY + Math.floor((rawM-1)/12);
+    const si = seasonIdx[nm]!==undefined ? seasonIdx[nm] : 1;
+    const linV = Math.max(0, reg.slope*(n+i)+reg.intercept)*si;
+    const holtV = Math.max(0, holt.level+holt.slope*(i+1))*si;
+    const hwV = hw ? hw.forecast(i+1) : 0;
+    const point = Math.max(0, W.lin*linV + W.holt*holtV + W.hw*hwV);
+    const unc = std*(1+i*0.25);
+    ensemble.push({ point, low:Math.max(0,point-1.5*unc), high:point+1.5*unc, month:`${ny}-${String(nm).padStart(2,'0')}` });
+  }
+
+  // MAPE via walk-forward on last 3 periods
+  let mape=null;
+  if(n>=6) {
+    const testN=Math.min(3,Math.floor(n/3));
+    const errs=[];
+    for(let t=n-testN; t<n; t++) {
+      const tr=linReg(vals.slice(0,t));
+      const pr=Math.max(0,tr.slope*t+tr.intercept);
+      errs.push(Math.abs((vals[t]-pr)/Math.max(1,vals[t])));
+    }
+    mape=errs.reduce((a,b)=>a+b,0)/errs.length;
+  }
+
+  const model = hw?'Holt-Winters':(hasEnoughData?'Holt Lineal':'Suavización Exponencial');
+  return { ensemble, mape, model, hasEnoughData };
+}
+
+// dailyForecast: day-of-week pattern + 30-day trend → 14-day forecast
+// Returns [{date,value,low,high,isProjection}]
+function dailyForecast(dailySales, daysAhead=14) {
+  if(!dailySales||dailySales.length<14) return [];
+  const sorted=[...dailySales].filter(r=>r.date&&r.total>=0).sort((a,b)=>a.date.localeCompare(b.date));
+  if(sorted.length<14) return [];
+  // Day-of-week indices from last 90 days
+  const r90=sorted.slice(-90);
+  const dS={},dC={};
+  r90.forEach(r=>{ const d=new Date(r.date+'T12:00:00').getDay(); dS[d]=(dS[d]||0)+r.total; dC[d]=(dC[d]||0)+1; });
+  const oAvg=r90.reduce((s,r)=>s+r.total,0)/r90.length||1;
+  const dowIdx={};
+  for(let d=0;d<7;d++) dowIdx[d]=dC[d]?(dS[d]/dC[d])/oAvg:1;
+  // 30-day trend
+  const r30=sorted.slice(-30);
+  const reg30=linReg(r30.map(r=>r.total));
+  const n30=r30.length;
+  const std30=Math.sqrt(r30.map(r=>r.total).reduce((s,v,i)=>{
+    const p=Math.max(0,reg30.slope*i+reg30.intercept); return s+(v-p)**2;
+  },0)/n30)||oAvg*0.2;
+  const lastDate=new Date(sorted[sorted.length-1].date+'T12:00:00');
+  return Array.from({length:daysAhead},(_,i)=>{
+    const d=new Date(lastDate); d.setDate(d.getDate()+i+1);
+    const ds=d.toISOString().split('T')[0];
+    const dow=d.getDay();
+    const base=Math.max(0,reg30.slope*(n30+i)+reg30.intercept);
+    const point=Math.max(0,base*(dowIdx[dow]||1));
+    return { date:ds, value:point, low:Math.max(0,point-std30), high:point+std30, isProjection:true };
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  KPIs
+// ═══════════════════════════════════════════════════════════════════
+function renderKPIs(id, inv, cost, sales, raw) {
+  const lastInv  = inv.length  ? inv[inv.length-1].value    : null;
+  const lastCif  = cost.length ? cost[cost.length-1].cifCost : null;
+  const lastImp  = cost.length ? cost[cost.length-1].importCost : null;
+  const totalSales = sales.reduce((s,r)=>s+r.total,0);
+  const totalDays  = sales.reduce((s,r)=>s+r.days,0);
+  const avgDaily = totalDays > 0 ? totalSales/totalDays : 0;
+  const projMonthly = avgDaily * 30;
+  const coverage = lastInv && projMonthly > 0 ? lastInv / projMonthly : null;
+  const coverageDays = avgDaily > 0 && lastInv ? Math.round(lastInv / avgDaily) : null;
+
+  // Current (latest) month sales
+  const lastMonth = sales.length ? sales[sales.length-1] : null;
+  const lastMonthSales = lastMonth ? lastMonth.total : null;
+  const lastMonthLabel = lastMonth ? (MONTH_NAMES[parseInt(lastMonth.month.split('-')[1])-1]+' '+lastMonth.month.split('-')[0]) : '';
+
+  const covClass = coverage === null ? 'info' : coverage < 1 ? 'crit' : coverage < 2 ? 'warn' : '';
+  const invClass = lastInv !== null && projMonthly > 0 && (lastInv - projMonthly) < 50 ? 'crit' : '';
+
+  // ── Financial metrics row ──────────────────────────────────────────
+  // MoM Growth: last vs previous month
+  const prevMonth = sales.length > 1 ? sales[sales.length-2] : null;
+  const momGrowth = prevMonth && prevMonth.total > 0 ? ((lastMonth.total - prevMonth.total)/prevMonth.total*100) : null;
+  const momClass  = momGrowth===null?'neu':momGrowth>=0?'pos':'neg';
+  const momStr    = momGrowth!==null ? (momGrowth>=0?'+':'')+momGrowth.toFixed(1)+'%' : 'N/A';
+
+  // Monthly average
+  const avgMonthly = sales.length ? totalSales/sales.length : 0;
+
+  // Annualized run rate
+  const runRate = avgDaily * 365;
+
+  // Best month in period
+  const bestMonth = sales.length ? sales.reduce((b,r)=>r.total>b.total?r:b) : null;
+  const bestLabel = bestMonth ? (MONTH_NAMES[parseInt(bestMonth.month.split('-')[1])-1]) : '—';
+
+  // Sales volatility (CV = std/mean)
+  const cv = (() => {
+    if (sales.length < 2) return null;
+    const mean = avgMonthly;
+    const std  = Math.sqrt(sales.map(r=>r.total).reduce((s,v)=>s+(v-mean)**2,0)/sales.length);
+    return mean > 0 ? std/mean*100 : null;
+  })();
+
+  // Avg inventory vs. sales coverage ratio (in months)
+  const avgInv = inv.length ? inv.reduce((s,r)=>s+r.value,0)/inv.length : null;
+  const invTurnover = avgInv && avgMonthly > 0 ? (avgMonthly / avgInv).toFixed(2) : null;
+
+  document.getElementById('kpi-'+id).innerHTML = `
+  <div class="kpi-grid">
+    <div class="kpi ${invClass}">
+      <div class="kpi-label">Current Inventory</div>
+      <div class="kpi-value ${lastInv>9999?'small':''}">${lastInv !== null ? fmt(lastInv) : 'N/A'}</div>
+      <div class="kpi-sub">MT · latest available month</div>
+      ${invClass==='crit'?'<div style="color:var(--red);font-size:10px;font-weight:700;margin-top:2px;">⚠ CRITICAL COVERAGE</div>':''}
+    </div>
+    <div class="kpi info">
+      <div class="kpi-label">Total Sales (period)</div>
+      <div class="kpi-value small">${fmt(totalSales)}</div>
+      <div class="kpi-sub">MT accumulated · ${sales.length} month(s)</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Daily Average</div>
+      <div class="kpi-value">${fmt(avgDaily,1)}</div>
+      <div class="kpi-sub">MT/day historical</div>
+    </div>
+    <div class="kpi ${covClass}">
+      <div class="kpi-label">Estimated Coverage</div>
+      <div class="kpi-value">${coverageDays !== null ? coverageDays+'d' : 'N/A'}</div>
+      <div class="kpi-sub">Days at current pace</div>
+      ${coverageDays!==null?`<div class="coverage-bar"><div class="coverage-fill" style="width:${Math.min(100,coverageDays/90*100)}%;background:${coverageDays<15?'var(--red)':coverageDays<30?'var(--yellow)':'var(--teal)'}"></div></div>`:''}
+    </div>
+    <div class="kpi purple">
+      <div class="kpi-label">Latest CIF Cost</div>
+      <div class="kpi-value small">${lastCif !== null ? '$'+fmt(lastCif,2) : 'N/A'}</div>
+      <div class="kpi-sub">Import: ${lastImp !== null ? '$'+fmt(lastImp,2) : 'N/A'} USD/MT</div>
+    </div>
+    <div class="kpi lime">
+      <div class="kpi-label">Latest Month Sales</div>
+      <div class="kpi-value small">${lastMonthSales !== null ? fmt(lastMonthSales) : 'N/A'}</div>
+      <div class="kpi-sub">MT · ${lastMonthLabel}</div>
+    </div>
+  </div>
+  <div class="kpi-metrics-grid">
+    <div class="kpi-sm ${momClass}">
+      <div class="kpi-sm-label">MoM Growth</div>
+      <div class="kpi-sm-value" style="${momGrowth!==null?(momGrowth>=0?'color:var(--teal);':'color:var(--red);'):''}">
+        ${momStr}
+      </div>
+      <div class="kpi-sm-sub">${prevMonth?MONTH_NAMES[parseInt(prevMonth.month.split('-')[1])-1]+' → '+lastMonthLabel:'vs previous month'}</div>
+    </div>
+    <div class="kpi-sm neu">
+      <div class="kpi-sm-label">Monthly Average</div>
+      <div class="kpi-sm-value">${fmt(avgMonthly,1)}</div>
+      <div class="kpi-sm-sub">MT/month · ${sales.length} period</div>
+    </div>
+    <div class="kpi-sm neu">
+      <div class="kpi-sm-label">Annualized Run Rate</div>
+      <div class="kpi-sm-value small">${fmt(runRate)} MT</div>
+      <div class="kpi-sm-sub">avg daily × 365</div>
+    </div>
+    <div class="kpi-sm gold">
+      <div class="kpi-sm-label">Best Month</div>
+      <div class="kpi-sm-value small">${bestMonth ? fmt(bestMonth.total,1) : 'N/A'}</div>
+      <div class="kpi-sm-sub">${bestLabel} · period peak</div>
+    </div>
+    <div class="kpi-sm ${invTurnover!==null&&parseFloat(invTurnover)>1.5?'neg':invTurnover!==null&&parseFloat(invTurnover)<0.5?'pos':'neu'}">
+      <div class="kpi-sm-label">Inv. Turnover</div>
+      <div class="kpi-sm-value">${invTurnover !== null ? invTurnover+'x' : 'N/A'}</div>
+      <div class="kpi-sm-sub">sales / avg inventory</div>
+    </div>
+    <div class="kpi-sm ${cv!==null&&cv>30?'neg':cv!==null&&cv<15?'pos':'neu'}">
+      <div class="kpi-sm-label">Sales Volatility</div>
+      <div class="kpi-sm-value">${cv !== null ? cv.toFixed(1)+'%' : 'N/A'}</div>
+      <div class="kpi-sm-sub">Coeff. of variation · ${cv===null?'N/A':cv<15?'Low':cv>30?'High':'Medium'}</div>
+    </div>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CHARTS
+// ═══════════════════════════════════════════════════════════════════
+function destroyChart(key) {
+  if (STATE.charts[key]) { STATE.charts[key].destroy(); delete STATE.charts[key]; }
+}
+
+const CHART_DEFAULTS = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+  scales: {
+    x: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } },
+    y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } }
+  }
+};
+
+function renderInventoryChart(id, inv) {
+  const key = 'inv-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-inv-'+id).getContext('2d');
+  const labels = inv.map(r => monthLabel(r.month));
+  const data   = inv.map(r => r.value);
+  const badge  = document.getElementById('inv-badge-'+id);
+  const lastVal = data.length ? data[data.length-1] : 0;
+  if (badge) badge.textContent = lastVal + ' MT';
+
+  STATE.charts[key] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Inventory (MT)',
+        data,
+        borderColor: '#00B580',
+        backgroundColor: 'rgba(0,181,128,.1)',
+        fill: true,
+        tension: 0.4,
+        pointRadius: 4,
+        pointBackgroundColor: '#00B580'
+      }]
+    },
+    options: { ...CHART_DEFAULTS,
+      plugins: { ...CHART_DEFAULTS.plugins, legend: { display: false },
+        annotation: {
+          annotations: {
+            threshold: {
+              type: 'line', yMin: ALERT_THRESHOLD, yMax: ALERT_THRESHOLD,
+              borderColor: 'rgba(229,62,62,.6)', borderWidth: 1.5, borderDash: [5,4],
+              label: { content: '50 MT mín', enabled: true, position: 'start', font: { size: 9 } }
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderCIFChart(id, cost) {
+  const key = 'cif-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-cif-'+id).getContext('2d');
+  STATE.charts[key] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: cost.map(r => monthLabel(r.month)),
+      datasets: [{
+        label: 'CIF Cost (USD/MT)',
+        data: cost.map(r => r.cifCost),
+        borderColor: '#3182CE',
+        backgroundColor: 'rgba(49,130,206,.08)',
+        fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#3182CE'
+      }]
+    },
+    options: CHART_DEFAULTS
+  });
+}
+
+function renderImportChart(id, cost) {
+  const key = 'import-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-import-'+id).getContext('2d');
+  STATE.charts[key] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: cost.map(r => monthLabel(r.month)),
+      datasets: [{
+        label: 'Import Cost (USD/MT)',
+        data: cost.map(r => r.importCost),
+        borderColor: '#6B46C1',
+        backgroundColor: 'rgba(107,70,193,.08)',
+        fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#6B46C1'
+      }]
+    },
+    options: CHART_DEFAULTS
+  });
+}
+
+function renderSalesLineChart(id, sales, product) {
+  const key = 'salesline-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-sales-line-'+id).getContext('2d');
+  const datasets = [];
+  const fields = product === 'all' ? ['total'] : [product];
+  const colors = { total:'#101B46', ...PRODUCT_COLORS };
+
+  // Show forecast for the month after last data point if it's current or future month
+  const today = new Date();
+  let projLabel = null, projPoint = null;
+  if (sales.length >= 3) {
+    const last = sales[sales.length-1];
+    const [lY,lM] = last.month.split('-').map(Number);
+    const rawN=lM+1; const nM=((rawN-1)%12)+1; const nY=lY+Math.floor((rawN-1)/12);
+    // Show if next month >= current month (includes current month in progress)
+    const isCurrentOrFuture = nY>today.getFullYear()||(nY===today.getFullYear()&&nM>=today.getMonth()+1);
+    if (isCurrentOrFuture) {
+      const ef = ensembleForecast(sales, 1);
+      if (ef && ef.ensemble.length) {
+        projLabel = MONTH_NAMES[nM-1]+' '+nY;
+        projPoint = ef.ensemble[0].point;
+      }
+    }
+  }
+
+  const histLabels = sales.map(r=>monthLabel(r.month));
+  const allLabels  = projLabel ? [...histLabels, projLabel] : histLabels;
+
+  fields.forEach(f => {
+    const histData = sales.map(r=>r[f]||0);
+    const color = colors[f]||'#101B46';
+    datasets.push({
+      label: f==='total'?'Total Sales':PRODUCT_LABELS[f],
+      data: projLabel ? [...histData, null] : histData,
+      borderColor: color, backgroundColor: color+'18',
+      fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: color, borderWidth: 2
+    });
+    if (projLabel && f === 'total') {
+      datasets.push({
+        label: 'Proyección',
+        data: [...Array(histData.length-1).fill(null), histData[histData.length-1], projPoint],
+        borderColor:'#00B580', backgroundColor:'#00B580',
+        fill:false, tension:0.4,
+        pointRadius:[...Array(histData.length).fill(0),7],
+        pointStyle:[...Array(histData.length).fill('circle'),'triangle'],
+        pointBackgroundColor:'#00B580', borderDash:[6,4], borderWidth:2
+      });
+    }
+  });
+
+  STATE.charts[key] = new Chart(ctx, {
+    type:'line',
+    data:{ labels:allLabels, datasets },
+    options:{
+      ...CHART_DEFAULTS,
+      plugins:{ ...CHART_DEFAULTS.plugins,
+        legend:{ display:!!projLabel, labels:{ font:{size:9}, boxWidth:10 } }
+      }
+    }
+  });
+}
+
+function renderSalesPieChart(id, sales) {
+  const key = 'pie-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-pie-'+id).getContext('2d');
+  // Pie: one slice per month, value = total sales that month
+  const labels = sales.map(r => monthLabel(r.month));
+  const data   = sales.map(r => r.total);
+  const colors = ['#101B46','#00B580','#C2D500','#3182CE','#D69E2E','#6B46C1','#718096','#E53E3E','#F6AD55','#805AD5','#38A169','#DD6B20'];
+  STATE.charts[key] = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors.slice(0, data.length), borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } },
+                 tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmt(ctx.parsed,1)} MT (${((ctx.parsed/data.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)` } } }
+    }
+  });
+}
+
+function renderProductsChart(id, sales) {
+  const key = 'products-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-products-'+id).getContext('2d');
+
+  // Check if we should add a forecast bar for the next month
+  const today = new Date();
+  let projLabel = null;
+  let projByProduct = {};
+  if (sales.length >= 3) {
+    const last = sales[sales.length-1];
+    const [lY,lM] = last.month.split('-').map(Number);
+    const rawN=lM+1; const nM=((rawN-1)%12)+1; const nY=lY+Math.floor((rawN-1)/12);
+    const isCurrentOrFuture = nY>today.getFullYear()||(nY===today.getFullYear()&&nM>=today.getMonth()+1);
+    if (isCurrentOrFuture) {
+      projLabel = MONTH_NAMES[nM-1]+' '+nY;
+      // Per-product linReg projection
+      PRODUCTS.forEach(p => {
+        const vals = sales.map(r=>r[p]||0);
+        const reg = linReg(vals);
+        projByProduct[p] = Math.max(0, reg.slope*vals.length+reg.intercept);
+      });
+    }
+  }
+
+  const histLabels = sales.map(r=>monthLabel(r.month));
+  const allLabels  = projLabel ? [...histLabels, projLabel] : histLabels;
+
+  // Historical datasets
+  const datasets = PRODUCTS.map(p => ({
+    label: PRODUCT_LABELS[p],
+    data: projLabel ? [...sales.map(r=>r[p]||0), null] : sales.map(r=>r[p]||0),
+    backgroundColor: PRODUCT_COLORS[p]+'CC',
+    borderColor: PRODUCT_COLORS[p],
+    borderWidth: 1
+  }));
+
+  // Forecast datasets (hatched style via lower opacity + dashed border)
+  if (projLabel) {
+    PRODUCTS.forEach(p => {
+      datasets.push({
+        label: PRODUCT_LABELS[p]+' (proy.)',
+        data: [...Array(sales.length).fill(null), projByProduct[p]],
+        backgroundColor: PRODUCT_COLORS[p]+'66',
+        borderColor: PRODUCT_COLORS[p],
+        borderWidth: 2,
+        borderDash: [4,3]
+      });
+    });
+  }
+
+  STATE.charts[key] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: allLabels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { filter: item => !item.text.includes('(proy.)'), font: { size: 9 }, boxWidth: 10 } } },
+      scales: {
+        x: { stacked: true, grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } },
+        y: { stacked: true, grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } }
+      }
+    }
+  });
+}
+
+function renderProjectionsChart(id, sales, product) {
+  const key = 'proj-'+id;
+  destroyChart(key);
+  const ctx = document.getElementById('chart-proj-'+id).getContext('2d');
+
+  if (sales.length === 0) {
+    STATE.charts[key] = new Chart(ctx, { type:'line', data:{ labels:[], datasets:[] }, options: CHART_DEFAULTS });
+    return;
+  }
+
+  const today = new Date();
+  const last = sales[sales.length-1];
+  const [lastY, lastM] = last.month.split('-').map(Number);
+  const rawN = lastM+1; const nextY=lastY+Math.floor((rawN-1)/12); const nextM=((rawN-1)%12)+1;
+  const isCurrentOrFuture = nextY>today.getFullYear()||(nextY===today.getFullYear()&&nextM>=today.getMonth()+1);
+
+  const ef = ensembleForecast(sales, 1);
+  const showProj = isCurrentOrFuture && ef && ef.ensemble.length > 0;
+  const projLabel = showProj ? (MONTH_NAMES[nextM-1]+' '+nextY) : null;
+
+  const subEl = document.getElementById('proj-sub-'+id);
+  if (subEl) {
+    if (!showProj) {
+      subEl.textContent = 'Datos históricos — sin proyección disponible';
+    } else if (!ef.hasEnoughData) {
+      subEl.textContent = `${ef.model} · Se recomiendan ≥7 meses para mayor precisión`;
+    } else {
+      const mapeStr = ef.mape !== null ? ` · Precisión histórica: ${fmt((1-ef.mape)*100,1)}%` : '';
+      subEl.textContent = `${ef.model}${mapeStr}`;
+    }
+  }
+
+  const fields = product==='all' ? ['total',...PRODUCTS.filter(p=>sales.some(r=>(r[p]||0)>0))] : [product];
+  const histLabels = sales.map(r=>monthLabel(r.month));
+  const allLabels  = projLabel ? [...histLabels, projLabel] : histLabels;
+  const datasets   = [];
+  const colors     = { total:'#101B46', ...PRODUCT_COLORS };
+
+  fields.forEach(f => {
+    const hist = sales.map(r=>r[f]||0);
+    const color = colors[f]||'#101B46';
+    datasets.push({
+      label:(f==='total'?'Total':PRODUCT_LABELS[f])+' (real)',
+      data: projLabel ? [...hist, null] : hist,
+      borderColor:color, backgroundColor:color+'14',
+      fill:false, tension:0.4, pointRadius:3, borderWidth:2
+    });
+    if (showProj) {
+      const projVal = f==='total'
+        ? ef.ensemble[0].point
+        : Math.max(0, (() => { const r=linReg(hist); return r.slope*hist.length+r.intercept; })());
+      datasets.push({
+        label:(f==='total'?'Total':PRODUCT_LABELS[f])+' (proy.)',
+        data:[...Array(hist.length-1).fill(null), hist[hist.length-1], projVal],
+        borderColor: f==='total'?'#C2D500':color,
+        backgroundColor: f==='total'?'#C2D500':color,
+        fill:false, tension:0.4,
+        pointRadius:[...Array(hist.length).fill(0), f==='total'?7:4],
+        pointStyle:[...Array(hist.length).fill('circle'), f==='total'?'diamond':'circle'],
+        pointBackgroundColor: f==='total'?'#C2D500':color,
+        borderDash:[6,4], borderWidth: f==='total'?2.5:1.5
+      });
+    }
+  });
+
+  STATE.charts[key] = new Chart(ctx, {
+    type:'line',
+    data:{ labels:allLabels, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{ position:'bottom', labels:{ font:{size:9}, boxWidth:10 } },
+        tooltip:{ mode:'index', intersect:false }
+      },
+      scales:{
+        x:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}} },
+        y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}} }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  DAILY SALES CHART
+// ═══════════════════════════════════════════════════════════════════
+function renderDailySalesChart(id, dailySales, year, mFrom, mTo) {
+  const key = 'daily-'+id;
+  destroyChart(key);
+  const el = document.getElementById('chart-daily-'+id);
+  if (!el) return;
+  const ctx = el.getContext('2d');
+
+  // Historical: filter by selected year/month range, deduplicate by date (sum totals)
+  const rawHistorical = dailySales.filter(r => {
+    if (!r.date) return false;
+    const [y,m] = r.date.split('-').map(Number);
+    return y===year && m>=mFrom && m<=mTo;
+  });
+  const byDate = {};
+  rawHistorical.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = { date:r.date, total:0 };
+    byDate[r.date].total += r.total || 0;
+  });
+  const historical = Object.values(byDate).sort((a,b)=>a.date.localeCompare(b.date));
+
+  // 14-day forecast from ALL available daily data (not just current year filter)
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayStr = today.toISOString().split('T')[0];
+  const allSorted = dailySales.filter(r=>r.date&&r.total>=0).sort((a,b)=>a.date.localeCompare(b.date));
+  // Only show 14-day forecast when viewing current year and last data is recent (within 45 days)
+  const lastDataDate = allSorted.length ? new Date(allSorted[allSorted.length-1].date+'T12:00:00') : null;
+  const daysSinceLast = lastDataDate ? (today - lastDataDate)/(86400000) : 999;
+  const showForecast = year===today.getFullYear() && daysSinceLast<=45 && allSorted.length>=14;
+  const forecastRows = showForecast ? dailyForecast(allSorted.filter(r=>r.total>0), 14) : [];
+
+  if (historical.length===0 && forecastRows.length===0) {
+    STATE.charts[key] = new Chart(ctx, { type:'bar', data:{labels:[],datasets:[]}, options:CHART_DEFAULTS });
+    return;
+  }
+
+  // Labels: all days in selected month range + 14 forecast days
+  const histShow = historical;
+  const dayLabel = r => {
+    const [,m,d] = r.date.split('-').map(Number);
+    return `${d} ${MONTH_NAMES[m-1].substring(0,3)}`;
+  };
+  const forecastDayLabel = r => {
+    const [,m,d] = r.date.split('-').map(Number);
+    return `${d} ${MONTH_NAMES[m-1].substring(0,3)}`;
+  };
+
+  const histLabels = histShow.map(dayLabel);
+  const foreLabels = forecastRows.map(forecastDayLabel);
+  const allLabels  = [...histLabels, ...foreLabels];
+  const n = histShow.length;
+
+  const histData = histShow.map(r=>r.total);
+  const foreData = forecastRows.map(r=>r.value);
+
+  const datasets = [
+    {
+      label:'MT/día (real)',
+      data:[...histData, ...Array(foreLabels.length).fill(null)],
+      backgroundColor:'rgba(0,181,128,0.6)', borderColor:'#00B580',
+      borderWidth:1, borderRadius:2, type:'bar'
+    }
+  ];
+
+  if (forecastRows.length>0) {
+    datasets.push({
+      label:'Proyección 14 días',
+      data:[...Array(n).fill(null), ...foreData],
+      backgroundColor:'rgba(194,213,0,0.45)', borderColor:'#C2D500',
+      borderWidth:1.5, borderRadius:2, type:'bar'
+    });
+  }
+
+  STATE.charts[key] = new Chart(ctx, {
+    type:'bar',
+    data:{ labels:allLabels, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{ display:forecastRows.length>0, labels:{ filter:item=>!item.text.startsWith('_'), font:{size:9}, boxWidth:10 } },
+        tooltip:{
+          callbacks:{
+            label: ctx => {
+              if(ctx.dataset.label?.startsWith('_')) return null;
+              return ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y,1)} MT`;
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ grid:{display:false}, ticks:{font:{size:9}, maxRotation:60, autoSkip:true, maxTicksLimit:35} },
+        y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}} }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PROJECTION TABLE
+// ═══════════════════════════════════════════════════════════════════
+function renderProjTable(id, inv, sales) {
+  const el = document.getElementById('proj-table-'+id);
+  if (!el) return;
+
+  const lastInv = inv.length ? inv[inv.length-1].value : null;
+  const today = new Date();
+
+  // Use ensemble for forward projections (up to 3 months)
+  const ef = ensembleForecast(sales, 3);
+  const rows = [];
+
+  // Historical rows with ensemble back-test
+  const totals = sales.map(r=>r.total);
+  const reg = linReg(totals);
+  sales.forEach((r,i) => {
+    const proj = Math.max(0, reg.slope*i+reg.intercept);
+    rows.push({ label:monthLabel(r.month), actual:r.total, projected:proj, low:null, high:null, delta:r.total-proj, isProj:false, month:r.month });
+  });
+
+  // Forward projected rows (only future months)
+  if (ef && ef.ensemble.length) {
+    ef.ensemble.forEach(e => {
+      const [py,pm] = e.month.split('-').map(Number);
+      const isFuture = py>today.getFullYear()||(py===today.getFullYear()&&pm>today.getMonth()+1);
+      if (!isFuture) return;
+      const coverLeft = lastInv !== null ? lastInv - e.point : null;
+      rows.push({
+        label: monthLabel(e.month)+' '+py, actual:null,
+        projected:e.point, low:e.low, high:e.high,
+        delta:null, isProj:true,
+        coverLeft, alert: coverLeft!==null && coverLeft<ALERT_THRESHOLD
+      });
+    });
+  }
+
+  const modelInfo = ef ? `<div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--bg-alt);">
+    Modelo: <strong>${ef.model}</strong>${ef.mape!==null?' · Precisión histórica: <strong>'+fmt((1-ef.mape)*100,1)+'%</strong>':''}
+    ${!ef.hasEnoughData?'<span style="color:var(--yellow);"> · Se recomiendan ≥7 meses para mayor precisión</span>':''}
+  </div>` : '';
+
+  let html = `<table class="proj-table">
+    <tr><th>Mes</th><th>Real (MT)</th><th>Proyección (MT)</th><th>Rango (−/+)</th><th>Δ vs Proyección</th><th>Inventario Restante</th><th>Estado</th></tr>`;
+
+  rows.forEach(r => {
+    const actual = r.actual!==null ? fmt(r.actual,1) : '—';
+    const proj   = fmt(r.projected,1);
+    const range  = (r.low!==null && r.high!==null) ? `<span style="font-size:10px;color:var(--muted);">${fmt(r.low,0)}–${fmt(r.high,0)}</span>` : '—';
+    const delta  = r.delta!==null ? (r.delta>=0?'+':'')+fmt(r.delta,1) : '—';
+    const dClass = r.delta!==null ? (r.delta>=0?'delta-pos':'delta-neg') : '';
+    const covVal = r.coverLeft!==null ? r.coverLeft : (r.isProj&&lastInv!==null ? lastInv-r.projected : null);
+    const covTxt = covVal!==null ? fmt(covVal,1)+' MT' : '—';
+    const alert  = covVal!==null && covVal<ALERT_THRESHOLD;
+    const status = r.isProj ? (alert?'<span class="alert-tag">⚠ < 50 MT</span>':'<span class="ok-tag">OK</span>') : '<span class="ok-tag">Real</span>';
+    const rowBg  = alert ? 'background:rgba(229,62,62,.04);' : '';
+    html += `<tr style="${rowBg}">
+      <td><strong>${r.label}</strong>${r.isProj?' <span style="font-size:9px;color:var(--muted);">(est.)</span>':''}</td>
+      <td class="val">${actual}</td>
+      <td class="val">${proj}</td>
+      <td>${range}</td>
+      <td class="val ${dClass}">${delta}</td>
+      <td class="val" style="${alert?'color:var(--red);font-weight:700;':''}">${covTxt}</td>
+      <td>${status}</td>
+    </tr>`;
+  });
+  html += `</table>${modelInfo}`;
+  el.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ALERT BANNER
+// ═══════════════════════════════════════════════════════════════════
+function renderAlertBanner(id, inv, sales) {
+  const banner = document.getElementById('alert-banner');
+  const text   = document.getElementById('alert-text');
+  const lastInv = inv.length ? inv[inv.length-1].value : null;
+
+  // Use ensemble forecast for alert projection
+  const ef = ensembleForecast(sales, 1);
+  const nextProj = ef && ef.ensemble.length ? ef.ensemble[0].point : null;
+  const nextHigh = ef && ef.ensemble.length ? ef.ensemble[0].high  : null;
+
+  if (lastInv !== null && nextProj !== null) {
+    const remaining = lastInv - nextProj;
+    const worstCase = nextHigh !== null ? lastInv - nextHigh : remaining;
+    if (remaining < ALERT_THRESHOLD) {
+      banner.className = 'show crit';
+      text.innerHTML = `⚠ ALERT ${id}: Inventory (${fmt(lastInv,1)} MT) − Next month projection (${fmt(nextProj,1)} MT) = <strong>${fmt(remaining,1)} MT</strong> — BELOW 50 MT MINIMUM`;
+    } else if (worstCase < ALERT_THRESHOLD) {
+      banner.className = 'show warn';
+      text.innerHTML = `⚡ ATTENTION ${id}: In a pessimistic scenario, coverage drops to <strong>${fmt(worstCase,1)} MT</strong> — near the minimum threshold (base projection: ${fmt(remaining,1)} MT)`;
+    } else if (remaining < ALERT_THRESHOLD * 2) {
+      banner.className = 'show warn';
+      text.innerHTML = `⚡ CAUTION ${id}: Coverage after projected sales: <strong>${fmt(remaining,1)} MT</strong> — approaching the minimum threshold`;
+    } else {
+      banner.className = 'show ok';
+      text.innerHTML = `✓ ${id}: Estimated coverage after projection: ${fmt(remaining,1)} MT — normal level`;
+    }
+  } else {
+    banner.className = '';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PDF REPORT GENERATOR
+//  Analista Financiero — Protocolo: Diagnóstico · Análisis · Hallazgos · Riesgo · Recomendación
+// ═══════════════════════════════════════════════════════════════════
+function generateRecommendations(id, lastInv, coverageDays, trendDir, trendPct, nextForecast, lastCif, avgCif, salesMonthly) {
+  const recs = [];
+  if (coverageDays !== null) {
+    if (coverageDays < 15)
+      recs.push({ priority:'CRITICAL', color:'#E53E3E', icon:'🔴', text:`Immediate replenishment required for ${id}. Only ${coverageDays} days of inventory remain at current sales pace. Initiate emergency procurement process without delay.` });
+    else if (coverageDays < 30)
+      recs.push({ priority:'HIGH', color:'#D69E2E', icon:'🟠', text:`Schedule replenishment for ${id} within the next ${Math.max(1,coverageDays-15)} days to maintain minimum safety stock of 50 MT. Risk of stockout is elevated.` });
+    else if (coverageDays < 60)
+      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'🟡', text:`Monitor inventory levels for ${id}. Projected coverage of ${coverageDays} days is adequate but approaching the recommended 60-day buffer. Plan next purchase order.` });
+    else
+      recs.push({ priority:'LOW', color:'#00B580', icon:'🟢', text:`Inventory coverage for ${id} is healthy at ${coverageDays} days. Maintain current replenishment schedule and optimize order timing to minimize holding costs.` });
+  }
+  if (trendDir === 'upward' && trendPct > 5)
+    recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'📈', text:`Sales volume is growing approximately ${trendPct.toFixed(1)}% per month. Increase future order volumes proportionally to meet projected demand growth and avoid stockout risk.` });
+  else if (trendDir === 'downward' && trendPct > 5)
+    recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'📉', text:`Sales volume is declining approximately ${trendPct.toFixed(1)}% per month. Investigate root causes — pricing competitiveness, market conditions, or customer churn — and develop a commercial recovery plan.` });
+  if (lastCif !== null && avgCif !== null && avgCif > 0) {
+    const costChg = (lastCif - avgCif) / avgCif * 100;
+    if (costChg > 5)
+      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'💲', text:`Latest CIF cost ($${fmt(lastCif,2)}/MT) is ${costChg.toFixed(1)}% above the period average ($${fmt(avgCif,2)}/MT). Review supplier contracts and explore alternative sourcing options to protect margins.` });
+    else if (costChg < -5)
+      recs.push({ priority:'LOW', color:'#00B580', icon:'💲', text:`Latest CIF cost ($${fmt(lastCif,2)}/MT) is ${Math.abs(costChg).toFixed(1)}% below period average. Favorable market — consider opportunistic forward purchasing to lock in lower costs.` });
+  }
+  if (nextForecast !== null && salesMonthly.length > 0) {
+    const lastM = salesMonthly[salesMonthly.length-1].total;
+    const deltaPct = lastM > 0 ? (nextForecast - lastM) / lastM * 100 : 0;
+    if (Math.abs(deltaPct) > 10)
+      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'🎯', text:`Ensemble forecast projects a ${Math.abs(deltaPct).toFixed(1)}% ${deltaPct>0?'increase':'decrease'} in next month sales (${fmt(nextForecast,1)} MT vs ${fmt(lastM,1)} MT last month). Adjust procurement and logistics capacity accordingly.` });
+  }
+  if (recs.length === 0)
+    recs.push({ priority:'LOW', color:'#00B580', icon:'✅', text:'All key operational metrics are within normal parameters. Continue monitoring the dashboard and maintain current replenishment and sales strategies.' });
+  return recs;
+}
+
+function generateReport() {
+  const id = STATE.activeIsland;
+  const raw = STATE.rawData?.islands?.[id];
+  if (!raw || raw.error) { alert('No data available for current island.'); return; }
+
+  const { year, monthFrom, monthTo } = STATE.filters;
+  const normalized = normalizeIslandData(raw, year, id);
+  const inv    = filterInventory(normalized.inventory, year, monthFrom, monthTo);
+  const cost   = filterCost(normalized.aveCost, year, monthFrom, monthTo);
+  const sales  = aggregateSalesMonthly(normalized.sales, year, monthFrom, monthTo);
+
+  const lastInv    = inv.length   ? inv[inv.length-1].value        : null;
+  const totalSales = sales.reduce((s,r)=>s+r.total,0);
+  const totalDays  = sales.reduce((s,r)=>s+r.days,0);
+  const avgDaily   = totalDays>0 ? totalSales/totalDays : 0;
+  const covDays    = avgDaily>0&&lastInv ? Math.round(lastInv/avgDaily) : null;
+  const lastCif    = cost.length ? cost[cost.length-1].cifCost     : null;
+  const avgCif     = cost.length ? cost.reduce((s,r)=>s+r.cifCost,0)/cost.length : null;
+
+  const ef         = ensembleForecast(sales,1);
+  const nextForecast = ef?.ensemble?.[0]?.point ?? null;
+  const mapeStr    = ef?.mape!=null ? fmt((1-ef.mape)*100,1)+'%' : 'N/A';
+
+  const reg        = linReg(sales.map(r=>r.total));
+  const trendDir   = reg.slope>0.01?'upward':reg.slope<-0.01?'downward':'flat';
+  const trendLabel = reg.slope>0.01?'Upward ↑':reg.slope<-0.01?'Downward ↓':'Stable →';
+  const trendPct   = sales.length>1&&sales[0].total>0 ? Math.abs(reg.slope/sales[0].total*100) : 0;
+  const invReg     = linReg(inv.map(r=>r.value));
+  const invLabel   = invReg.slope>0.01?'Increasing ↑':invReg.slope<-0.01?'Decreasing ↓':'Stable →';
+  const riskLabel  = covDays===null?'N/A':covDays<15?'🔴 CRITICAL':covDays<30?'🟠 HIGH':covDays<60?'🟡 MEDIUM':'🟢 LOW';
+  const INAMES     = {SXM:'Saint Maarten',USVI:'Saint Thomas (USVI)',ANU:'Antigua & Barbuda',DOM:'Dominica'};
+  const period     = monthFrom===monthTo ? MONTH_NAMES[monthFrom-1]+' '+year
+                     : MONTH_NAMES[monthFrom-1]+' – '+MONTH_NAMES[monthTo-1]+' '+year;
+  const recs       = generateRecommendations(id,lastInv,covDays,trendDir,trendPct,nextForecast,lastCif,avgCif,sales);
+  const now        = new Date().toLocaleString('en');
+
+  const th  = `style="padding:7px 12px;text-align:left;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;"`;
+  const thr = `style="padding:7px 12px;text-align:right;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;"`;
+  const hdr = `style="background:#101B46;color:#fff;"`;
+  const alt = `style="background:#F5F6F7;"`;
+  const td  = (v,extra='')=>`<td style="padding:7px 12px;${extra}">${v}</td>`;
+  const tdb = (v,extra='')=>`<td style="padding:7px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;${extra}">${v}</td>`;
+
+  const sectionHead = (n,title,color)=>
+    `<div class="report-section"><div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;letter-spacing:1px;color:#101B46;border-left:4px solid ${color};padding-left:10px;margin-bottom:12px;">${n}. ${title}</div>`;
+
+  // Chart image capture
+  const chartImg = (canvasId, label) => {
+    const el = document.getElementById(canvasId);
+    if (!el) return '';
+    try {
+      const src = el.toDataURL('image/png');
+      return `<div style="margin-bottom:18px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#4A5568;font-weight:600;margin-bottom:6px;">${label}</div>
+        <img src="${src}" style="width:100%;border-radius:6px;border:1px solid #E2E8F0;">
+      </div>`;
+    } catch(e) { return ''; }
+  };
+
+  const html = `
+<div style="font-family:'Barlow',sans-serif;max-width:860px;margin:0 auto;padding:40px 48px;color:#101B46;">
+  <div style="border-bottom:4px solid #101B46;padding-bottom:16px;margin-bottom:28px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:32px;letter-spacing:4px;">ARGOS</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:11px;letter-spacing:4px;color:#00B580;margin-top:2px;">OPERATIONS INTELLIGENCE</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;margin-top:12px;">OPERATIONS FINANCIAL REPORT — ${id} · ${INAMES[id]||id}</div>
+    <div style="font-size:12px;color:#4A5568;margin-top:4px;">Period: ${period} &nbsp;·&nbsp; Generated: ${now}</div>
+  </div>
+
+  ${sectionHead(1,'EXECUTIVE SUMMARY','#C2D500')}
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>KPI</th><th ${thr}>Value</th><th ${th}>Assessment</th></tr>
+    <tr ${alt}>${td('<strong>Current Inventory</strong>')}${tdb(lastInv!==null?fmt(lastInv,1)+' MT':'N/A')}${td(invLabel,'color:#4A5568;')}</tr>
+    <tr>${td('<strong>Total Sales (period)</strong>')}${tdb(fmt(totalSales,1)+' MT')}${td(sales.length+' month(s) accumulated','color:#4A5568;')}</tr>
+    <tr ${alt}>${td('<strong>Average Daily Sales</strong>')}${tdb(fmt(avgDaily,2)+' MT/day')}${td('Trend: '+trendLabel,'color:#4A5568;')}</tr>
+    <tr>${td('<strong>Estimated Coverage</strong>')}${tdb(covDays!==null?covDays+' days':'N/A',covDays!==null&&covDays<30?'color:#E53E3E;':'')}${td(riskLabel)}</tr>
+    <tr ${alt}>${td('<strong>Next Month Forecast</strong>')}${tdb(nextForecast!==null?fmt(nextForecast,1)+' MT':'N/A')}${td('Model accuracy: '+mapeStr,'color:#4A5568;')}</tr>
+    <tr>${td('<strong>Latest CIF Cost</strong>')}${tdb(lastCif!==null?'$'+fmt(lastCif,2)+'/MT':'N/A')}${td(avgCif!==null?'Period avg: $'+fmt(avgCif,2)+'/MT':'','color:#4A5568;')}</tr>
+  </table></div>
+
+  ${inv.length>0?sectionHead(2,'INVENTORY ANALYSIS','#00B580')+`
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>Month</th><th ${thr}>Inventory (MT)</th><th ${thr}>MoM Change</th><th ${thr}>Coverage Days</th></tr>
+    ${inv.map((r,i)=>{
+      const prev=i>0?inv[i-1].value:null;
+      const chg=prev!==null?r.value-prev:null;
+      const pct=prev&&prev>0?chg/prev*100:null;
+      const cov=avgDaily>0?Math.round(r.value/avgDaily):null;
+      const bg=i%2===0?'background:#F5F6F7;':'';
+      const mLabel=MONTH_NAMES[parseInt(r.month.split('-')[1])-1]+' '+r.month.split('-')[0];
+      return`<tr style="${bg}">${td('<strong>'+mLabel+'</strong>')}${tdb(fmt(r.value,1))}
+        ${td(chg!==null?(chg>=0?'+':'')+fmt(chg,1)+(pct!==null?' ('+( chg>=0?'+':'')+pct.toFixed(1)+'%)':''):'—',chg!==null?(chg>=0?'color:#00B580;':'color:#E53E3E;')+'text-align:right;':'text-align:right;')}
+        ${td(cov!==null?cov+'d':'—','text-align:right;'+(cov!==null&&cov<30?'color:#E53E3E;font-weight:700;':''))}
+      </tr>`;
+    }).join('')}
+  </table></div>`:''}
+
+  ${sales.length>0?sectionHead(3,'SALES PERFORMANCE','#3182CE')+`
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>Month</th><th ${thr}>Total (MT)</th><th ${thr}>MoM Δ</th><th ${thr}>Local Bulk</th><th ${thr}>Export Bulk</th><th ${thr}>Local 21kg</th></tr>
+    ${sales.map((r,i)=>{
+      const prev=i>0?sales[i-1].total:null;
+      const chg=prev!==null?r.total-prev:null;
+      const pct=prev&&prev>0?chg/prev*100:null;
+      const bg=i%2===0?'background:#F5F6F7;':'';
+      const mLabel=MONTH_NAMES[parseInt(r.month.split('-')[1])-1]+' '+r.month.split('-')[0];
+      return`<tr style="${bg}">${td('<strong>'+mLabel+'</strong>')}${tdb(fmt(r.total,1))}
+        ${td(chg!==null?(chg>=0?'+':'')+fmt(chg,1)+(pct!==null?' ('+pct.toFixed(1)+'%)':''):'—',chg!==null?(chg>=0?'color:#00B580;':'color:#E53E3E;')+'text-align:right;':'text-align:right;')}
+        ${td(fmt(r.localBulk,1),'text-align:right;')}${td(fmt(r.exportBulk,1),'text-align:right;')}${td(fmt(r.local21kg,1),'text-align:right;')}
+      </tr>`;
+    }).join('')}
+    <tr style="background:#101B46;color:#fff;">
+      <td style="padding:7px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;">TOTAL</td>
+      <td style="padding:7px 12px;text-align:right;font-family:'Barlow Condensed',sans-serif;font-weight:800;">${fmt(totalSales,1)} MT</td>
+      <td colspan="4" style="padding:7px 12px;text-align:right;font-size:11px;">Trend: ${trendLabel} · Avg: ${fmt(avgDaily,2)} MT/day</td>
+    </tr>
+  </table></div>`:''}
+
+  ${sectionHead(4,'FORECAST &amp; PROJECTIONS','#D69E2E')}
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>Metric</th><th ${thr}>Value</th></tr>
+    <tr ${alt}>${td('<strong>Next Month Sales Forecast</strong>')}${tdb(nextForecast!==null?fmt(nextForecast,1)+' MT':'N/A','text-align:right;')}</tr>
+    <tr>${td('<strong>Forecast Model Used</strong>')}${td(ef?.model??'N/A','text-align:right;color:#4A5568;')}</tr>
+    <tr ${alt}>${td('<strong>Model Accuracy (MAPE)</strong>')}${td(mapeStr,'text-align:right;color:#4A5568;')}</tr>
+    <tr>${td('<strong>Inventory Post-Projection</strong>')}${tdb(lastInv!==null&&nextForecast!==null?fmt(lastInv-nextForecast,1)+' MT':'N/A','text-align:right;'+(lastInv!==null&&nextForecast!==null&&(lastInv-nextForecast)<50?'color:#E53E3E;':''))}</tr>
+  </table></div>
+
+  ${sectionHead(5,'RISK ASSESSMENT','#E53E3E')}
+  <div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;line-height:1.9;margin-bottom:4px;">
+    <div><strong>Coverage Risk:</strong> ${riskLabel} — ${covDays!==null?covDays+' days remaining at current average daily sales pace':'Cannot calculate — inventory or sales data unavailable'}</div>
+    <div><strong>Sales Trend:</strong> ${trendLabel}${trendPct>5?' ('+trendPct.toFixed(1)+'% avg monthly change)':''}</div>
+    <div><strong>Inventory Trend:</strong> ${invLabel}</div>
+    ${lastInv!==null&&nextForecast!==null&&(lastInv-nextForecast)<50?'<div style="color:#E53E3E;font-weight:700;margin-top:6px;">⚠ CRITICAL: Post-projection inventory falls below the 50 MT minimum safety threshold. Immediate action required.</div>':''}
+  </div></div>
+
+  ${sectionHead(6,'STRATEGIC RECOMMENDATIONS','#6B46C1')}
+  ${recs.map(r=>`
+    <div style="display:flex;gap:12px;padding:10px 14px;margin-bottom:8px;background:#F5F6F7;border-radius:6px;border-left:3px solid ${r.color};">
+      <div style="font-size:16px;flex-shrink:0;">${r.icon}</div>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;color:#4A5568;margin-bottom:3px;">${r.priority} PRIORITY</div>
+        <div style="font-size:12px;line-height:1.6;">${r.text}</div>
+      </div>
+    </div>`).join('')}
+  </div>
+
+  ${sectionHead(7,'CHARTS SNAPSHOT','#101B46')}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+    <div>
+      ${chartImg('chart-inv-'+id, 'Monthly Inventory (MT)')}
+      ${chartImg('chart-sales-line-'+id, 'Total Sales Trend')}
+      ${chartImg('chart-daily-'+id, 'Daily Sales Movement')}
+    </div>
+    <div>
+      ${chartImg('chart-cif-'+id, 'CIF Import Cost (USD/MT)')}
+      ${chartImg('chart-products-'+id, 'Sales by Product')}
+      ${chartImg('chart-proj-'+id, 'Sales Projections & Forecast')}
+    </div>
+  </div>
+  </div>
+
+  <div style="border-top:2px solid #E2E8F0;padding-top:12px;margin-top:12px;font-size:10px;color:#718096;display:flex;justify-content:space-between;">
+    <div>ARGOS Operations Intelligence — ${id} · ${INAMES[id]||id} — VP RCCA Caribbean Terminals</div>
+    <div>Generated ${now} · Confidential</div>
+  </div>
+</div>`;
+
+  const overlay = document.getElementById('print-overlay');
+  overlay.innerHTML = html;
+  overlay.style.display = 'block';
+  setTimeout(() => window.print(), 80);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function showLoading(msg) {
+  document.getElementById('loading-text').textContent = msg || 'Loading…';
+  document.getElementById('loading').classList.add('show');
+}
+function hideLoading() { document.getElementById('loading').classList.remove('show'); }
+
+function showError(msg) {
+  const banner = document.getElementById('alert-banner');
+  document.getElementById('alert-text').innerHTML = '⚠ ' + msg;
+  banner.className = 'show crit';
+}
+
+function fmt(v, decimals = 0) {
+  if (v === null || v === undefined || isNaN(v)) return 'N/A';
+  return Number(v).toLocaleString('es', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+</script>
+</body>
+</html>
