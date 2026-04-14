@@ -272,9 +272,6 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <div class="filter-sep"></div>
       <label>Year</label>
       <select id="f-year" class="filter-select" onchange="onYearChange()">
-        <option value="2024">2024</option>
-        <option value="2025">2025</option>
-        <option value="2026" selected>2026</option>
       </select>
       <div class="filter-sep"></div>
       <label>From Month</label>
@@ -664,7 +661,8 @@ const ALERT_THRESHOLD = 50; // MT
 const STATE = {
   rawData: null,
   activeIsland: 'SXM',
-  filters: { year: 2026, monthFrom: 1, monthTo: 12, product: 'all' },
+  filters: { year: new Date().getFullYear(), monthFrom: 1, monthTo: new Date().getMonth()+1, product: 'all' },
+  loadedFromYear: new Date().getFullYear() - 1,  // tracks oldest year currently in memory
   charts: {}
 };
 
@@ -684,13 +682,23 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('print-overlay').style.display = 'none';
   });
 
-  // set default month filter to current month
+  // Populate year dropdown dynamically: current year down to 5 years back
   const now = new Date();
-  document.getElementById('f-year').value = now.getFullYear();
+  const curY = now.getFullYear();
+  const yearSel = document.getElementById('f-year');
+  for (let y = curY; y >= curY - 2; y--) {
+    const opt = document.createElement('option');
+    opt.value = y; opt.textContent = y;
+    if (y === curY) opt.selected = true;
+    yearSel.appendChild(opt);
+  }
+
+  // Set default month filter
   document.getElementById('f-month-from').value = 1;
   document.getElementById('f-month-to').value = now.getMonth() + 1;
-  STATE.filters.year = now.getFullYear();
+  STATE.filters.year    = curY;
   STATE.filters.monthTo = now.getMonth() + 1;
+  STATE.loadedFromYear  = curY; // starts at current year, expands as user selects past years
 });
 
 function doLogin() {
@@ -717,34 +725,77 @@ function startApp(name) {
 // ═══════════════════════════════════════════════════════════════════
 //  DATA FETCH
 // ═══════════════════════════════════════════════════════════════════
-async function refreshData() {
-  showLoading('Querying SharePoint…');
+// Fetch a single specific year from PA and merge into STATE.rawData
+async function fetchYear(year) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 115000); // 115s — just under PA 120s limit
+  showLoading(`Loading ${year} data from SharePoint…`);
   try {
     const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'getData', fromYear: 2025, islands: ['ANU','DOM','SXM','USVI'] })
+      body: JSON.stringify({ action: 'getData', fromYear: year, islands: ['ANU','DOM','SXM','USVI'] }),
+      signal: controller.signal
     });
+    clearTimeout(timer);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
-    STATE.rawData = json;
-    const ts = json.lastUpdated ? new Date(json.lastUpdated).toLocaleString('en') : 'now';
-    document.getElementById('last-update-txt').textContent = 'Updated: ' + ts;
-    applyFilters();
+    // Merge: if no data yet, use directly; otherwise deep-merge islands
+    if (!STATE.rawData) {
+      STATE.rawData = json;
+    } else {
+      const islands = ['SXM','USVI','ANU','DOM'];
+      islands.forEach(id => {
+        const existing = STATE.rawData.islands?.[id];
+        const incoming = json.islands?.[id];
+        if (!incoming || incoming.error) return;
+        if (!existing || existing.error) {
+          STATE.rawData.islands[id] = incoming;
+          return;
+        }
+        // Append arrays — deduplication happens in filterInventory/filterCost/aggregateSales
+        existing.sales     = [...(existing.sales||[]),     ...(incoming.sales||[])];
+        existing.inventory = [...(existing.inventory||[]), ...(incoming.inventory||[])];
+        existing.aveCost   = [...(existing.aveCost||[]),   ...(incoming.aveCost||[])];
+      });
+    }
+    if (year < STATE.loadedFromYear) STATE.loadedFromYear = year;
+    return true;
   } catch(e) {
-    showError('Error loading data: ' + e.message);
+    clearTimeout(timer);
+    if (e.name === 'AbortError') {
+      showError(`Timeout loading ${year} — Power Automate 120s limit reached`);
+    } else {
+      showError(`Error loading ${year}: ` + e.message);
+    }
+    return false;
   } finally {
     hideLoading();
+  }
+}
+
+// Initial load or manual refresh — loads current year only (fast)
+async function refreshData() {
+  const curY = new Date().getFullYear();
+  STATE.rawData = null;
+  STATE.loadedFromYear = curY;
+  const ok = await fetchYear(curY);
+  if (ok) {
+    const ts = new Date().toLocaleString('en');
+    document.getElementById('last-update-txt').textContent = `Updated: ${ts} · ${curY} loaded`;
+    applyFilters();
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  FILTERS
 // ═══════════════════════════════════════════════════════════════════
-// Called only when the year dropdown changes — auto-resets months for past years
+// Called only when the year dropdown changes
 function onYearChange() {
   const selectedYear = parseInt(document.getElementById('f-year').value);
   const currentYear  = new Date().getFullYear();
+
+  // Auto-set month range
   if (selectedYear < currentYear) {
     document.getElementById('f-month-from').value = 1;
     document.getElementById('f-month-to').value   = 12;
@@ -752,6 +803,17 @@ function onYearChange() {
     document.getElementById('f-month-from').value = 1;
     document.getElementById('f-month-to').value   = new Date().getMonth() + 1;
   }
+
+  // If selected year is not yet in memory → fetch it from PA then render
+  if (selectedYear < STATE.loadedFromYear) {
+    fetchYear(selectedYear).then(ok => { if (ok) {
+      const ts = new Date().toLocaleString('en');
+      document.getElementById('last-update-txt').textContent = `Updated: ${ts} · ${STATE.loadedFromYear}–${new Date().getFullYear()} loaded`;
+      applyFilters();
+    }});
+    return;
+  }
+
   applyFilters();
 }
 
