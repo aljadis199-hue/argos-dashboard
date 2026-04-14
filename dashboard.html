@@ -1213,7 +1213,7 @@ function ensembleForecast(monthlySales, monthsAhead=1) {
     mape=errs.reduce((a,b)=>a+b,0)/errs.length;
   }
 
-  const model = hw?'Holt-Winters':(hasEnoughData?'Holt Lineal':'Suavización Exponencial');
+  const model = hw?'Holt-Winters':(hasEnoughData?'Holt Linear':'Exponential Smoothing');
   return { ensemble, mape, model, hasEnoughData };
 }
 
@@ -1507,7 +1507,7 @@ function renderSalesLineChart(id, sales, product) {
     });
     if (projLabel && f === 'total') {
       datasets.push({
-        label: 'Proyección',
+        label: 'Projection',
         data: [...Array(histData.length-1).fill(null), histData[histData.length-1], projPoint],
         borderColor:'#00B580', backgroundColor:'#00B580',
         fill:false, tension:0.4,
@@ -1642,7 +1642,7 @@ function renderProjectionsChart(id, sales, product) {
     if (!showProj) {
       subEl.textContent = 'Datos históricos — sin proyección disponible';
     } else if (!ef.hasEnoughData) {
-      subEl.textContent = `${ef.model} · Se recomiendan ≥7 meses para mayor precisión`;
+      subEl.textContent = `${ef.model} · ≥7 months recommended for better accuracy`;
     } else {
       const mapeStr = ef.mape !== null ? ` · Precisión histórica: ${fmt((1-ef.mape)*100,1)}%` : '';
       subEl.textContent = `${ef.model}${mapeStr}`;
@@ -1767,7 +1767,7 @@ function renderDailySalesChart(id, dailySales, year, mFrom, mTo) {
 
   if (forecastRows.length>0) {
     datasets.push({
-      label:'Proyección 14 días',
+      label:'14-day Projection',
       data:[...Array(n).fill(null), ...foreData],
       backgroundColor:'rgba(194,213,0,0.45)', borderColor:'#C2D500',
       borderWidth:1.5, borderRadius:2, type:'bar'
@@ -1837,12 +1837,12 @@ function renderProjTable(id, inv, sales) {
   }
 
   const modelInfo = ef ? `<div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--bg-alt);">
-    Modelo: <strong>${ef.model}</strong>${ef.mape!==null?' · Precisión histórica: <strong>'+fmt((1-ef.mape)*100,1)+'%</strong>':''}
-    ${!ef.hasEnoughData?'<span style="color:var(--yellow);"> · Se recomiendan ≥7 meses para mayor precisión</span>':''}
+    Model: <strong>${ef.model}</strong>${ef.mape!==null?' · Historical accuracy: <strong>'+fmt((1-ef.mape)*100,1)+'%</strong>':''}
+    ${!ef.hasEnoughData?'<span style="color:var(--yellow);"> · ≥7 months recommended for better accuracy</span>':''}
   </div>` : '';
 
   let html = `<table class="proj-table">
-    <tr><th>Mes</th><th>Real (MT)</th><th>Proyección (MT)</th><th>Rango (−/+)</th><th>Δ vs Proyección</th><th>Inventario Restante</th><th>Estado</th></tr>`;
+    <tr><th>Month</th><th>Actual (MT)</th><th>Projection (MT)</th><th>Range (−/+)</th><th>Δ vs Projection</th><th>Remaining Inventory</th><th>Status</th></tr>`;
 
   rows.forEach(r => {
     const actual = r.actual!==null ? fmt(r.actual,1) : '—';
