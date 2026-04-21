@@ -14,7 +14,7 @@
 const ARGOS_CONFIG = {
 
   // ── LO ÚNICO QUE DEBES EDITAR ────────────────────────────────────────────
-  FLOW_URL: 'https://defaultfaa44fd9dabe4064a6bb59608ea9d0.f3.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/45be830588fc49afb85785dd9fb0c5c9/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=V0Rh2pg58NftxX-P48dLDr8T3zRTkM7LrJ-nN1tAZQ0',
+  FLOW_URL: 'REEMPLAZAR-CON-URL-DEL-FLOW',
 
   // ── PARÁMETROS OPERACIONALES (no tocar) ──────────────────────────────────
   REFRESH_MINUTES: 30,
