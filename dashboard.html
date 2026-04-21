@@ -8,6 +8,7 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="forecast-engine.js"></script>
 <style>
 :root{
   --navy:#101B46;--lime:#C2D500;--teal:#00B580;--muted:#4A5568;
@@ -658,13 +659,189 @@ const PRODUCT_COLORS = {'localBulk':'#101B46','exportBulk':'#00B580','local21kg'
                         'export21kg':'#3182CE','local15mt':'#D69E2E','export15mt':'#6B46C1','otherType':'#718096'};
 const ALERT_THRESHOLD = 50; // MT
 
+// ── LOCAL STORAGE CACHE ───────────────────────────────────────────
+const CACHE_KEY = 'argos_raw_v3';
+const CACHE_TTL = 8 * 60 * 60 * 1000; // 8 hours
+
+function saveCache() {
+  if (!STATE.rawData) return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      ts:             Date.now(),
+      loadedFromYear: STATE.loadedFromYear,
+      rawData:        STATE.rawData
+    }));
+  } catch(e) { /* storage quota exceeded — ignore */ }
+}
+
+function loadCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    if (!c.rawData || Date.now() - c.ts > CACHE_TTL) return null;
+    return c;
+  } catch(e) { return null; }
+}
+
 const STATE = {
   rawData: null,
   activeIsland: 'SXM',
   filters: { year: new Date().getFullYear(), monthFrom: 1, monthTo: new Date().getMonth()+1, product: 'all' },
-  loadedFromYear: new Date().getFullYear() - 1,  // tracks oldest year currently in memory
+  loadedFromYear: new Date().getFullYear() - 1,
+  isLoading: false,
+  loadedYears: new Set(),
   charts: {}
 };
+
+// ═══════════════════════════════════════════════════════════════════
+//  DATA FETCH
+// ═══════════════════════════════════════════════════════════════════
+
+async function _fetchOneYear(year, showErrors) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 115000);
+  try {
+    const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'getData', fromYear: year, islands: ['ANU','DOM','SXM','USVI'] }),
+      signal:  controller.signal
+    });
+    clearTimeout(timer);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    if (!STATE.rawData) {
+      STATE.rawData = json;
+    } else {
+      ['SXM','USVI','ANU','DOM'].forEach(id => {
+        const ex  = STATE.rawData.islands?.[id];
+        const inc = json.islands?.[id];
+        if (!inc || inc.error) return;
+        if (!ex  || ex.error)  { STATE.rawData.islands[id] = inc; return; }
+        ex.sales     = [...(ex.sales||[]),     ...(inc.sales||[])];
+        ex.inventory = [...(ex.inventory||[]), ...(inc.inventory||[])];
+        ex.aveCost   = [...(ex.aveCost||[]),   ...(inc.aveCost||[])];
+      });
+    }
+    if (year < STATE.loadedFromYear) STATE.loadedFromYear = year;
+    STATE.loadedYears.add(year);
+    saveCache();
+    return true;
+  } catch(e) {
+    clearTimeout(timer);
+    if (showErrors) {
+      if (e.name === 'AbortError') showError(`Timeout loading ${year} — Power Automate 120s limit`);
+      else showError(`Error loading ${year}: ` + e.message);
+    }
+    return false;
+  }
+}
+
+async function loadInitial() {
+  if (STATE.isLoading) return;
+  STATE.isLoading = true;
+  const curY = new Date().getFullYear();
+  const prevRawData = STATE.rawData;
+  STATE.rawData = null;
+  STATE.loadedYears.clear();
+  showLoading(`Loading ${curY} data from SharePoint…`);
+  try {
+    const ok1 = await _fetchOneYear(curY, true);
+    if (!ok1) {
+      STATE.rawData = prevRawData; // restore old data so charts stay populated
+      document.getElementById('last-update-txt').textContent = 'Error — click Refresh to retry';
+      return;
+    }
+    document.getElementById('last-update-txt').textContent =
+      `${curY} loaded · Loading ${curY - 1}…`;
+    applyFilters();
+    const ok2 = await _fetchOneYear(curY - 1, true);
+    const ts   = new Date().toLocaleString('en');
+    document.getElementById('last-update-txt').textContent = ok2
+      ? `Updated: ${ts} · ${curY - 1}–${curY} loaded`
+      : `Updated: ${ts} · ${curY} loaded`;
+    applyFilters();
+  } finally {
+    STATE.isLoading = false;
+    hideLoading();
+  }
+}
+
+async function silentRefresh() {
+  if (STATE.isLoading) return;
+  STATE.isLoading = true;
+  const curY = new Date().getFullYear();
+  let tempData = null;
+  let tempYear = curY;
+  try {
+    try {
+      const c1 = new AbortController();
+      setTimeout(() => c1.abort(), 115000);
+      const r1 = await fetch(ARGOS_CONFIG.FLOW_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'getData', fromYear: curY, islands: ['ANU','DOM','SXM','USVI'] }),
+        signal:  c1.signal
+      });
+      if (!r1.ok) return;
+      tempData = await r1.json();
+    } catch(e) { return; }
+    try {
+      const c2 = new AbortController();
+      setTimeout(() => c2.abort(), 115000);
+      const r2 = await fetch(ARGOS_CONFIG.FLOW_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'getData', fromYear: curY - 1, islands: ['ANU','DOM','SXM','USVI'] }),
+        signal:  c2.signal
+      });
+      if (r2.ok) {
+        const j2 = await r2.json();
+        ['SXM','USVI','ANU','DOM'].forEach(id => {
+          const ex  = tempData.islands?.[id];
+          const inc = j2.islands?.[id];
+          if (!inc || inc.error) return;
+          if (!ex  || ex.error)  { tempData.islands[id] = inc; return; }
+          ex.sales     = [...(ex.sales||[]),     ...(inc.sales||[])];
+          ex.inventory = [...(ex.inventory||[]), ...(inc.inventory||[])];
+          ex.aveCost   = [...(ex.aveCost||[]),   ...(inc.aveCost||[])];
+        });
+        tempYear = curY - 1;
+      }
+    } catch(e) { /* previous year failed — keep curY-only data */ }
+    STATE.rawData        = tempData;
+    STATE.loadedFromYear = tempYear;
+    STATE.loadedYears.clear();
+    STATE.loadedYears.add(curY);
+    if (tempYear < curY) STATE.loadedYears.add(curY - 1);
+    saveCache();
+    const ts = new Date().toLocaleString('en');
+    document.getElementById('last-update-txt').textContent = tempYear < curY
+      ? `Updated: ${ts} · ${tempYear}–${curY} loaded`
+      : `Updated: ${ts} · ${curY} loaded`;
+    applyFilters();
+  } finally {
+    STATE.isLoading = false;
+  }
+}
+
+async function fetchYear(year, showSpinner) {
+  if (STATE.loadedYears.has(year)) return true;
+  if (STATE.isLoading) return false;
+  STATE.isLoading = true;
+  if (showSpinner) showLoading(`Loading ${year} data from SharePoint…`);
+  try {
+    return await _fetchOneYear(year, true);
+  } finally {
+    STATE.isLoading = false;
+    if (showSpinner) hideLoading();
+  }
+}
+
+function refreshData() {
+  return loadInitial();
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  BOOT
@@ -674,15 +851,9 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('setup-screen').classList.add('show');
     return;
   }
-  const saved = sessionStorage.getItem('argos_user');
-  if (saved) { startApp(saved); }
-  else { document.getElementById('login-screen').classList.add('show'); }
 
-  window.addEventListener('afterprint', () => {
-    document.getElementById('print-overlay').style.display = 'none';
-  });
-
-  // Populate year dropdown dynamically: current year down to 5 years back
+  // Populate year dropdown and set filter defaults FIRST
+  // so applyFilters() always reads a valid year value
   const now = new Date();
   const curY = now.getFullYear();
   const yearSel = document.getElementById('f-year');
@@ -692,13 +863,38 @@ window.addEventListener('DOMContentLoaded', () => {
     if (y === curY) opt.selected = true;
     yearSel.appendChild(opt);
   }
-
-  // Set default month filter
   document.getElementById('f-month-from').value = 1;
   document.getElementById('f-month-to').value = now.getMonth() + 1;
   STATE.filters.year    = curY;
   STATE.filters.monthTo = now.getMonth() + 1;
-  STATE.loadedFromYear  = curY; // starts at current year, expands as user selects past years
+  STATE.loadedFromYear  = curY;
+
+  // Now start the app (year dropdown is ready, applyFilters will read correct values)
+  const saved = sessionStorage.getItem('argos_user');
+  if (saved) { startApp(saved); }
+  else { document.getElementById('login-screen').classList.add('show'); }
+
+  window.addEventListener('afterprint', () => {
+    document.getElementById('print-overlay').style.display = 'none';
+  });
+
+  // When tab becomes visible again, refresh silently if data is >20 min old.
+  // Guards against duplicate calls while a load is already in progress.
+  let _lastVisRefresh = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!document.getElementById('app').classList.contains('show')) return;
+    if (STATE.isLoading) return;
+    if (!STATE.rawData) return; // failed initial load — user must click Refresh manually
+    const now = Date.now();
+    if (now - _lastVisRefresh < 10 * 60 * 1000) return; // 10-min cooldown between auto-refreshes
+    const cached = loadCache();
+    const age = cached ? now - cached.ts : Infinity;
+    if (age > 20 * 60 * 1000) {
+      _lastVisRefresh = now;
+      silentRefresh();
+    }
+  });
 });
 
 function doLogin() {
@@ -718,80 +914,40 @@ function startApp(name) {
   document.getElementById('app').classList.add('show');
   document.getElementById('header-name').textContent = name;
   document.getElementById('header-avatar').textContent = name.charAt(0).toUpperCase();
-  refreshData();
-  setInterval(refreshData, (ARGOS_CONFIG.REFRESH_MINUTES || 30) * 60 * 1000);
-}
 
-// ═══════════════════════════════════════════════════════════════════
-//  DATA FETCH
-// ═══════════════════════════════════════════════════════════════════
-// Fetch a single specific year from PA and merge into STATE.rawData
-async function fetchYear(year) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 115000); // 115s — just under PA 120s limit
-  showLoading(`Loading ${year} data from SharePoint…`);
-  try {
-    const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'getData', fromYear: year, islands: ['ANU','DOM','SXM','USVI'] }),
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const json = await resp.json();
-    // Merge: if no data yet, use directly; otherwise deep-merge islands
-    if (!STATE.rawData) {
-      STATE.rawData = json;
-    } else {
-      const islands = ['SXM','USVI','ANU','DOM'];
-      islands.forEach(id => {
-        const existing = STATE.rawData.islands?.[id];
-        const incoming = json.islands?.[id];
-        if (!incoming || incoming.error) return;
-        if (!existing || existing.error) {
-          STATE.rawData.islands[id] = incoming;
-          return;
-        }
-        // Append arrays — deduplication happens in filterInventory/filterCost/aggregateSales
-        existing.sales     = [...(existing.sales||[]),     ...(incoming.sales||[])];
-        existing.inventory = [...(existing.inventory||[]), ...(incoming.inventory||[])];
-        existing.aveCost   = [...(existing.aveCost||[]),   ...(incoming.aveCost||[])];
-      });
-    }
-    if (year < STATE.loadedFromYear) STATE.loadedFromYear = year;
-    return true;
-  } catch(e) {
-    clearTimeout(timer);
-    if (e.name === 'AbortError') {
-      showError(`Timeout loading ${year} — Power Automate 120s limit reached`);
-    } else {
-      showError(`Error loading ${year}: ` + e.message);
-    }
-    return false;
-  } finally {
-    hideLoading();
-  }
-}
+  showLoading('Initializing dashboard…');
 
-// Initial load or manual refresh — loads current year only (fast)
-async function refreshData() {
+  const cached = loadCache();
+  // Only use cache if it contains actual sales data for the current year
   const curY = new Date().getFullYear();
-  STATE.rawData = null;
-  STATE.loadedFromYear = curY;
-  const ok = await fetchYear(curY);
-  if (ok) {
-    const ts = new Date().toLocaleString('en');
-    document.getElementById('last-update-txt').textContent = `Updated: ${ts} · ${curY} loaded`;
-    applyFilters();
+  const cacheHasData = cached && Object.values(cached.rawData?.islands || {}).some(
+    isl => (isl?.sales || []).some(r => r.date && r.date.startsWith(String(curY)))
+  );
+
+  if (cacheHasData) {
+    STATE.rawData        = cached.rawData;
+    STATE.loadedFromYear = cached.loadedFromYear;
+    STATE.loadedYears.clear();
+    STATE.loadedYears.add(curY);
+    if (cached.loadedFromYear < curY) STATE.loadedYears.add(curY - 1);
+    const ts = new Date(cached.ts).toLocaleString('en');
+    document.getElementById('last-update-txt').textContent = `Cached: ${ts} · Refreshing…`;
+    requestAnimationFrame(() => {
+      applyFilters();
+      hideLoading();
+      silentRefresh();
+    });
+  } else {
+    loadInitial();
   }
+
+  setInterval(() => silentRefresh(), 25 * 60 * 1000);
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  FILTERS
 // ═══════════════════════════════════════════════════════════════════
-// Called only when the year dropdown changes
-function onYearChange() {
+async function onYearChange() {
   const selectedYear = parseInt(document.getElementById('f-year').value);
   const currentYear  = new Date().getFullYear();
 
@@ -804,14 +960,13 @@ function onYearChange() {
     document.getElementById('f-month-to').value   = new Date().getMonth() + 1;
   }
 
-  // If selected year is not yet in memory → fetch it from PA then render
-  if (selectedYear < STATE.loadedFromYear) {
-    fetchYear(selectedYear).then(ok => { if (ok) {
+  if (!STATE.loadedYears.has(selectedYear)) {
+    const ok = await fetchYear(selectedYear, true);
+    if (ok) {
       const ts = new Date().toLocaleString('en');
-      document.getElementById('last-update-txt').textContent = `Updated: ${ts} · ${STATE.loadedFromYear}–${new Date().getFullYear()} loaded`;
-      applyFilters();
-    }});
-    return;
+      document.getElementById('last-update-txt').textContent =
+        `Updated: ${ts} · ${STATE.loadedFromYear}–${currentYear} loaded`;
+    }
   }
 
   applyFilters();
@@ -881,8 +1036,9 @@ function renderIsland(id) {
   const inv = filterInventory(normalized.inventory, year, monthFrom, monthTo);
   // Filter aveCost by year and month range
   const cost = filterCost(normalized.aveCost, year, monthFrom, monthTo);
-  // Aggregate sales by month (filtered)
-  const salesMonthly = aggregateSalesMonthly(normalized.sales, year, monthFrom, monthTo);
+  // Aggregate sales: filtered (display) + all loaded history (forecasting)
+  const salesMonthly    = aggregateSalesMonthly(normalized.sales, year, monthFrom, monthTo);
+  const allSalesMonthly = aggregateAllSalesMonthly(normalized.sales);
 
   renderKPIs(id, inv, cost, salesMonthly, raw);
   renderInventoryChart(id, inv);
@@ -893,8 +1049,8 @@ function renderIsland(id) {
   renderProductsChart(id, salesMonthly);
   renderProjectionsChart(id, salesMonthly, product);
   renderDailySalesChart(id, normalized.sales, year, monthFrom, monthTo);
-  renderProjTable(id, inv, salesMonthly);
-  renderAlertBanner(id, inv, salesMonthly);
+  renderProjTable(id, inv, salesMonthly, allSalesMonthly);
+  renderAlertBanner(id, inv, allSalesMonthly);
 }
 
 function renderPending(id) {
@@ -972,8 +1128,8 @@ function normalizeIslandData(raw, year, islandId) {
   const applyTerminalFilter = rows => {
     const filtered = rows.filter(terminalOk);
     if (filtered.length === 0 && rows.length > 0) {
-      // Only fall back to all rows if the file has NO Terminal column at all (not yet configured).
-      // If rows have Terminal values from a known island but none match ours → real mismatch → return empty.
+      // Only fall back to all rows if NO row has any known-island Terminal value.
+      // If rows have Terminal values from another known island → wrong island data → return empty.
       const hasKnownTerminal = rows.some(r => {
         const t = getVal(r, ['Terminal','TERMINAL','terminal']);
         if (t === undefined || t === null) return false;
@@ -1080,6 +1236,27 @@ function aggregateSalesMonthly(dailySales, year, mFrom, mTo) {
   return Object.values(byMonth).sort((a,b) => a.month.localeCompare(b.month));
 }
 
+// All months across ALL loaded years — used to feed the forecast engine with maximum history
+function aggregateAllSalesMonthly(dailySales) {
+  const byMonth = {};
+  dailySales.forEach(r => {
+    if (!r.date) return;
+    const [y, m] = r.date.split('-').map(Number);
+    const key = `${y}-${String(m).padStart(2,'0')}`;
+    if (!byMonth[key]) byMonth[key] = { month:key, total:0, localBulk:0, exportBulk:0, local21kg:0, export21kg:0, local15mt:0, export15mt:0, otherType:0, days:0 };
+    byMonth[key].total      += r.total      || 0;
+    byMonth[key].localBulk  += r.localBulk  || 0;
+    byMonth[key].exportBulk += r.exportBulk || 0;
+    byMonth[key].local21kg  += r.local21kg  || 0;
+    byMonth[key].export21kg += r.export21kg || 0;
+    byMonth[key].local15mt  += r.local15mt  || 0;
+    byMonth[key].export15mt += r.export15mt || 0;
+    byMonth[key].otherType  += r.otherType  || 0;
+    byMonth[key].days++;
+  });
+  return Object.values(byMonth).sort((a,b) => a.month.localeCompare(b.month));
+}
+
 function monthLabel(key) {
   const [,m] = key.split('-').map(Number);
   return MONTH_NAMES[m-1];
@@ -1103,150 +1280,19 @@ function project(reg, fromIdx, count) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  ADVANCED FORECASTING ENGINE
-//  Analista Financiero — Metodologías:
-//    · Holt-Winters Triple Exponential Smoothing (trend + seasonality)
-//    · Holt Linear (trend + level)
-//    · Seasonal Decomposition (monthly indices)
-//    · Ensemble weighted forecast with confidence intervals (±1.5σ)
-//    · Day-of-week daily forecast for 14-day horizon
-//  Mínimo recomendado: 7 meses de historia para proyecciones fiables
+//  FORECAST ENGINE — delegates to forecast-engine.js (ArgosForecaster)
+//  Models: Holt-Winters · Holt Linear · Seasonal Naive · AR(1) · SES
+//  Weights: walk-forward MAPE backtest → adaptive inverse-error
+//  Data: always uses full history (current + previous year loaded at boot)
 // ═══════════════════════════════════════════════════════════════════
 
-function holtLinear(data, alpha=0.4, beta=0.15) {
-  if (data.length < 2) return { fitted: data.slice(), slope: 0, level: data[data.length-1]||0 };
-  let l = data[0], b = data[1] - data[0];
-  const fitted = [];
-  for (const v of data) {
-    const lp=l, bp=b;
-    l = alpha*v + (1-alpha)*(lp+bp);
-    b = beta*(l-lp) + (1-beta)*bp;
-    fitted.push(lp+bp);
-  }
-  return { fitted, slope:b, level:l };
-}
-
-function holtWinters(data, alpha=0.4, beta=0.1, gamma=0.3, period=12) {
-  const n = data.length;
-  if (n < period*2) return null;
-  // Seasonal init: average of first two full cycles
-  const s = [];
-  let avg1=0, avg2=0;
-  for(let j=0; j<period; j++) avg1 += data[j]/period;
-  for(let j=period; j<period*2; j++) avg2 += data[j]/period;
-  for(let i=0; i<period; i++) s[i] = ((data[i]/(avg1||1))+(data[i+period]/(avg2||1)))/2;
-  let l = avg1;
-  let b = 0;
-  for(let i=0; i<period; i++) b += (data[i+period]-data[i])/(period*period);
-  const fitted=[];
-  for(let i=0; i<n; i++) {
-    const m=i%period, pl=l, pb=b, ps=s[m];
-    l = alpha*(data[i]/(ps||1))+(1-alpha)*(pl+pb);
-    b = beta*(l-pl)+(1-beta)*pb;
-    s[m] = gamma*(data[i]/(l||1))+(1-gamma)*ps;
-    fitted.push((pl+pb)*(ps||1));
-  }
-  const forecast = h => Math.max(0, (l+b*h)*(s[(n-1+h)%period]||1));
-  const mape = fitted.reduce((sum,f,i)=>sum+Math.abs((data[i]-f)/Math.max(1,Math.abs(data[i]))),0)/n;
-  return { fitted, forecast, mape };
-}
-
-function computeSeasonalIndices(monthlySales) {
-  const byM={}, cntM={};
-  const overall = monthlySales.length ? monthlySales.reduce((s,r)=>s+r.total,0)/monthlySales.length : 1;
-  monthlySales.forEach(r => {
-    const m = parseInt(r.month.split('-')[1]);
-    byM[m]=(byM[m]||0)+r.total; cntM[m]=(cntM[m]||0)+1;
-  });
-  const idx={};
-  for(const m in byM) idx[m] = overall>0 ? (byM[m]/cntM[m])/overall : 1;
-  return idx;
-}
-
-// ensembleForecast: weighted blend of Holt-Winters + Holt + LinReg + Seasonal
-// Returns { ensemble:[{point,low,high,month}], mape, model, hasEnoughData }
 function ensembleForecast(monthlySales, monthsAhead=1) {
-  const MIN_MONTHS = 7;
-  if (!monthlySales || monthlySales.length < 3) return null;
-  const vals = monthlySales.map(r=>r.total);
-  const n = vals.length;
-  const hasEnoughData = n >= MIN_MONTHS;
-  const lastKey = monthlySales[n-1].month;
-  const [lY, lM] = lastKey.split('-').map(Number);
-
-  const reg = linReg(vals);
-  const holt = holtLinear(vals, 0.4, 0.15);
-  const hw = n>=12 ? holtWinters(vals,0.4,0.1,0.3,12) : null;
-  const seasonIdx = computeSeasonalIndices(monthlySales);
-
-  // Volatility: std of residuals from last 6 months
-  const recent = vals.slice(-Math.min(6,n));
-  const rMean = recent.reduce((a,b)=>a+b,0)/recent.length;
-  const std = Math.sqrt(recent.reduce((s,v)=>s+(v-rMean)**2,0)/recent.length)||rMean*0.15;
-
-  const W = hw ? {lin:0.20,holt:0.25,hw:0.55} : (hasEnoughData ? {lin:0.35,holt:0.65,hw:0} : {lin:0.45,holt:0.55,hw:0});
-
-  const ensemble=[];
-  for(let i=0; i<monthsAhead; i++) {
-    const rawM = lM+i+1;
-    const nm = ((rawM-1)%12)+1;
-    const ny = lY + Math.floor((rawM-1)/12);
-    const si = seasonIdx[nm]!==undefined ? seasonIdx[nm] : 1;
-    const linV = Math.max(0, reg.slope*(n+i)+reg.intercept)*si;
-    const holtV = Math.max(0, holt.level+holt.slope*(i+1))*si;
-    const hwV = hw ? hw.forecast(i+1) : 0;
-    const point = Math.max(0, W.lin*linV + W.holt*holtV + W.hw*hwV);
-    const unc = std*(1+i*0.25);
-    ensemble.push({ point, low:Math.max(0,point-1.5*unc), high:point+1.5*unc, month:`${ny}-${String(nm).padStart(2,'0')}` });
-  }
-
-  // MAPE via walk-forward on last 3 periods
-  let mape=null;
-  if(n>=6) {
-    const testN=Math.min(3,Math.floor(n/3));
-    const errs=[];
-    for(let t=n-testN; t<n; t++) {
-      const tr=linReg(vals.slice(0,t));
-      const pr=Math.max(0,tr.slope*t+tr.intercept);
-      errs.push(Math.abs((vals[t]-pr)/Math.max(1,vals[t])));
-    }
-    mape=errs.reduce((a,b)=>a+b,0)/errs.length;
-  }
-
-  const model = hw?'Holt-Winters':(hasEnoughData?'Holt Linear':'Exponential Smoothing');
-  return { ensemble, mape, model, hasEnoughData };
+  return window.ArgosForecaster?.forecast(monthlySales, monthsAhead) ?? null;
 }
-
-// dailyForecast: day-of-week pattern + 30-day trend → 14-day forecast
-// Returns [{date,value,low,high,isProjection}]
 function dailyForecast(dailySales, daysAhead=14) {
-  if(!dailySales||dailySales.length<14) return [];
-  const sorted=[...dailySales].filter(r=>r.date&&r.total>=0).sort((a,b)=>a.date.localeCompare(b.date));
-  if(sorted.length<14) return [];
-  // Day-of-week indices from last 90 days
-  const r90=sorted.slice(-90);
-  const dS={},dC={};
-  r90.forEach(r=>{ const d=new Date(r.date+'T12:00:00').getDay(); dS[d]=(dS[d]||0)+r.total; dC[d]=(dC[d]||0)+1; });
-  const oAvg=r90.reduce((s,r)=>s+r.total,0)/r90.length||1;
-  const dowIdx={};
-  for(let d=0;d<7;d++) dowIdx[d]=dC[d]?(dS[d]/dC[d])/oAvg:1;
-  // 30-day trend
-  const r30=sorted.slice(-30);
-  const reg30=linReg(r30.map(r=>r.total));
-  const n30=r30.length;
-  const std30=Math.sqrt(r30.map(r=>r.total).reduce((s,v,i)=>{
-    const p=Math.max(0,reg30.slope*i+reg30.intercept); return s+(v-p)**2;
-  },0)/n30)||oAvg*0.2;
-  const lastDate=new Date(sorted[sorted.length-1].date+'T12:00:00');
-  return Array.from({length:daysAhead},(_,i)=>{
-    const d=new Date(lastDate); d.setDate(d.getDate()+i+1);
-    const ds=d.toISOString().split('T')[0];
-    const dow=d.getDay();
-    const base=Math.max(0,reg30.slope*(n30+i)+reg30.intercept);
-    const point=Math.max(0,base*(dowIdx[dow]||1));
-    return { date:ds, value:point, low:Math.max(0,point-std30), high:point+std30, isProjection:true };
-  });
+  return window.ArgosForecaster?.dailyForecast(dailySales, daysAhead) ?? [];
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  KPIs
@@ -1801,15 +1847,16 @@ function renderDailySalesChart(id, dailySales, year, mFrom, mTo) {
 // ═══════════════════════════════════════════════════════════════════
 //  PROJECTION TABLE
 // ═══════════════════════════════════════════════════════════════════
-function renderProjTable(id, inv, sales) {
+function renderProjTable(id, inv, sales, allSales) {
   const el = document.getElementById('proj-table-'+id);
   if (!el) return;
 
   const lastInv = inv.length ? inv[inv.length-1].value : null;
   const today = new Date();
 
-  // Use ensemble for forward projections (up to 3 months)
-  const ef = ensembleForecast(sales, 3);
+  // Use full history for forecast (allSales), filtered view for historical display
+  const forecastData = (allSales && allSales.length >= sales.length) ? allSales : sales;
+  const ef = ensembleForecast(forecastData, 3);
   const rows = [];
 
   // Historical rows with ensemble back-test
