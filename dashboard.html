@@ -700,7 +700,7 @@ const STATE = {
 
 async function _fetchOneYear(year, showErrors) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 115000);
+  const timer = setTimeout(() => controller.abort(), 200000);
   try {
     const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
       method:  'POST',
@@ -709,6 +709,7 @@ async function _fetchOneYear(year, showErrors) {
       signal:  controller.signal
     });
     clearTimeout(timer);
+    if (resp.status === 504) throw new Error('PA_TIMEOUT');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
     if (!STATE.rawData) {
@@ -731,7 +732,8 @@ async function _fetchOneYear(year, showErrors) {
   } catch(e) {
     clearTimeout(timer);
     if (showErrors) {
-      if (e.name === 'AbortError') showError(`Timeout loading ${year} — Power Automate 120s limit`);
+      if (e.name === 'AbortError' || e.message === 'PA_TIMEOUT')
+        showError(`${year} timeout — enable concurrency (50) in Apply to Each in the PA flow`);
       else showError(`Error loading ${year}: ` + e.message);
     }
     return false;
@@ -745,22 +747,31 @@ async function loadInitial() {
   const prevRawData = STATE.rawData;
   STATE.rawData = null;
   STATE.loadedYears.clear();
+  STATE.loadedFromYear = curY;
   showLoading(`Loading ${curY} data from SharePoint…`);
   try {
+    // Load current year first (fewer months → faster, stays under PA's 120s limit)
     const ok1 = await _fetchOneYear(curY, true);
-    if (!ok1) {
-      STATE.rawData = prevRawData; // restore old data so charts stay populated
+    if (ok1) {
+      hideLoading();
+      const ts = new Date().toLocaleString('en');
+      document.getElementById('last-update-txt').textContent =
+        `Updated: ${ts} · ${curY} loaded — loading ${curY - 1}…`;
+      applyFilters();
+    }
+    // Load previous year (more data — may be slower)
+    showLoading(`Loading ${curY - 1} data from SharePoint…`);
+    const ok2 = await _fetchOneYear(curY - 1, true);
+    if (!ok1 && !ok2) {
+      STATE.rawData = prevRawData;
       document.getElementById('last-update-txt').textContent = 'Error — click Refresh to retry';
       return;
     }
+    const ts = new Date().toLocaleString('en');
     document.getElementById('last-update-txt').textContent =
-      `${curY} loaded · Loading ${curY - 1}…`;
-    applyFilters();
-    const ok2 = await _fetchOneYear(curY - 1, true);
-    const ts   = new Date().toLocaleString('en');
-    document.getElementById('last-update-txt').textContent = ok2
-      ? `Updated: ${ts} · ${curY - 1}–${curY} loaded`
-      : `Updated: ${ts} · ${curY} loaded`;
+      (ok1 && ok2) ? `Updated: ${ts} · ${curY - 1}–${curY} loaded` :
+      ok1          ? `Updated: ${ts} · ${curY} loaded` :
+                     `Updated: ${ts} · ${curY - 1} loaded`;
     applyFilters();
   } finally {
     STATE.isLoading = false;
@@ -772,54 +783,78 @@ async function silentRefresh() {
   if (STATE.isLoading) return;
   STATE.isLoading = true;
   const curY = new Date().getFullYear();
+  const prevRaw = STATE.rawData;
   let tempData = null;
-  let tempYear = curY;
-  try {
+  let tempLoadedFrom = curY;
+
+  const fetchToTemp = async (year) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 200000);
     try {
-      const c1 = new AbortController();
-      setTimeout(() => c1.abort(), 115000);
-      const r1 = await fetch(ARGOS_CONFIG.FLOW_URL, {
+      const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ action: 'getData', fromYear: curY, islands: ['ANU','DOM','SXM','USVI'] }),
-        signal:  c1.signal
+        body:    JSON.stringify({ action: 'getData', fromYear: year, islands: ['ANU','DOM','SXM','USVI'] }),
+        signal:  controller.signal
       });
-      if (!r1.ok) return;
-      tempData = await r1.json();
-    } catch(e) { return; }
-    try {
-      const c2 = new AbortController();
-      setTimeout(() => c2.abort(), 115000);
-      const r2 = await fetch(ARGOS_CONFIG.FLOW_URL, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ action: 'getData', fromYear: curY - 1, islands: ['ANU','DOM','SXM','USVI'] }),
-        signal:  c2.signal
-      });
-      if (r2.ok) {
-        const j2 = await r2.json();
+      clearTimeout(timer);
+      if (!resp.ok) return false;
+      const json = await resp.json();
+      if (!tempData) {
+        tempData = json;
+      } else {
         ['SXM','USVI','ANU','DOM'].forEach(id => {
           const ex  = tempData.islands?.[id];
-          const inc = j2.islands?.[id];
+          const inc = json.islands?.[id];
           if (!inc || inc.error) return;
           if (!ex  || ex.error)  { tempData.islands[id] = inc; return; }
           ex.sales     = [...(ex.sales||[]),     ...(inc.sales||[])];
           ex.inventory = [...(ex.inventory||[]), ...(inc.inventory||[])];
           ex.aveCost   = [...(ex.aveCost||[]),   ...(inc.aveCost||[])];
         });
-        tempYear = curY - 1;
       }
-    } catch(e) { /* previous year failed — keep curY-only data */ }
+      if (year < tempLoadedFrom) tempLoadedFrom = year;
+      return true;
+    } catch(e) { clearTimeout(timer); return false; }
+  };
+
+  try {
+    const ok1 = await fetchToTemp(curY);
+    const ok2 = await fetchToTemp(curY - 1);
+    if (!ok1 && !ok2) return;
+    if (!tempData) return;
+
+    // If one year failed, carry over that year's data from prevRaw
+    if ((!ok1 || !ok2) && prevRaw?.islands) {
+      const missingYear = String(!ok1 ? curY : curY - 1);
+      ['SXM','USVI','ANU','DOM'].forEach(id => {
+        const oldIsl = prevRaw.islands[id];
+        if (!oldIsl || oldIsl.error) return;
+        const newIsl = tempData.islands?.[id];
+        if (!newIsl || newIsl.error) return;
+        const pSales = (oldIsl.sales||[]).filter(r => r.date?.startsWith(missingYear));
+        const pInv   = (oldIsl.inventory||[]).filter(r => r.month?.startsWith(missingYear));
+        const pCost  = (oldIsl.aveCost||[]).filter(r => r.month?.startsWith(missingYear));
+        if (pSales.length) newIsl.sales     = [...(newIsl.sales||[]),     ...pSales];
+        if (pInv.length)   newIsl.inventory = [...(newIsl.inventory||[]), ...pInv];
+        if (pCost.length)  newIsl.aveCost   = [...(newIsl.aveCost||[]),   ...pCost];
+      });
+      if (!ok1 && prevRaw.loadedFromYear < tempLoadedFrom) tempLoadedFrom = prevRaw.loadedFromYear;
+    }
+
     STATE.rawData        = tempData;
-    STATE.loadedFromYear = tempYear;
+    STATE.loadedFromYear = tempLoadedFrom;
     STATE.loadedYears.clear();
-    STATE.loadedYears.add(curY);
-    if (tempYear < curY) STATE.loadedYears.add(curY - 1);
+    if (ok1) STATE.loadedYears.add(curY);
+    if (ok2) STATE.loadedYears.add(curY - 1);
+    if (!ok2 && prevRaw?.islands) STATE.loadedYears.add(curY - 1);
+
     saveCache();
     const ts = new Date().toLocaleString('en');
-    document.getElementById('last-update-txt').textContent = tempYear < curY
-      ? `Updated: ${ts} · ${tempYear}–${curY} loaded`
-      : `Updated: ${ts} · ${curY} loaded`;
+    document.getElementById('last-update-txt').textContent =
+      STATE.loadedYears.has(curY - 1)
+        ? `Updated: ${ts} · ${curY - 1}–${curY} loaded`
+        : `Updated: ${ts} · ${curY} loaded`;
     applyFilters();
   } finally {
     STATE.isLoading = false;
@@ -880,17 +915,17 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // When tab becomes visible again, refresh silently if data is >20 min old.
   // Guards against duplicate calls while a load is already in progress.
-  let _lastVisRefresh = 0;
+  let _lastVisRefresh = Date.now(); // grace period from page load
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (!document.getElementById('app').classList.contains('show')) return;
     if (STATE.isLoading) return;
     if (!STATE.rawData) return; // failed initial load — user must click Refresh manually
     const now = Date.now();
-    if (now - _lastVisRefresh < 10 * 60 * 1000) return; // 10-min cooldown between auto-refreshes
+    if (now - _lastVisRefresh < 25 * 60 * 1000) return; // 25-min cooldown between auto-refreshes
     const cached = loadCache();
     const age = cached ? now - cached.ts : Infinity;
-    if (age > 20 * 60 * 1000) {
+    if (age > 30 * 60 * 1000) {
       _lastVisRefresh = now;
       silentRefresh();
     }
@@ -2182,3 +2217,5 @@ function fmt(v, decimals = 0) {
 </script>
 </body>
 </html>
+
+
