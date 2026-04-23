@@ -698,14 +698,14 @@ const STATE = {
 //  DATA FETCH
 // ═══════════════════════════════════════════════════════════════════
 
-async function _fetchOneYear(year, showErrors) {
+async function _fetchOneYear(year, showErrors, forceRefresh = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 200000);
   try {
     const resp = await fetch(ARGOS_CONFIG.FLOW_URL, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: 'getData', fromYear: year, islands: ['ANU','DOM','SXM','USVI'] }),
+      body:    JSON.stringify({ action: 'getData', fromYear: year, islands: ['ANU','DOM','SXM','USVI'], forceRefresh }),
       signal:  controller.signal
     });
     clearTimeout(timer);
@@ -750,8 +750,8 @@ async function loadInitial() {
   STATE.loadedFromYear = curY;
   showLoading(`Loading ${curY} data from SharePoint…`);
   try {
-    // Load current year first (fewer months → faster, stays under PA's 120s limit)
-    const ok1 = await _fetchOneYear(curY, true);
+    // Load current year first — forceRefresh:true bypasses PA cache on manual refresh
+    const ok1 = await _fetchOneYear(curY, true, true);
     if (ok1) {
       hideLoading();
       const ts = new Date().toLocaleString('en');
@@ -761,7 +761,7 @@ async function loadInitial() {
     }
     // Load previous year (more data — may be slower)
     showLoading(`Loading ${curY - 1} data from SharePoint…`);
-    const ok2 = await _fetchOneYear(curY - 1, true);
+    const ok2 = await _fetchOneYear(curY - 1, true, true);
     if (!ok1 && !ok2) {
       STATE.rawData = prevRawData;
       document.getElementById('last-update-txt').textContent = 'Error — click Refresh to retry';
@@ -2217,5 +2217,3 @@ function fmt(v, decimals = 0) {
 </script>
 </body>
 </html>
-
-
