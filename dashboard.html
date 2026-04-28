@@ -72,6 +72,7 @@ header{background:var(--navy);height:60px;padding:0 28px;display:flex;align-item
 .h-right{display:flex;align-items:center;gap:18px;}
 .pulse-row{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.5);}
 .pulse{width:6px;height:6px;border-radius:50%;background:var(--lime);animation:pulse 2s infinite;}
+.pulse.updating{background:var(--yellow);animation:pulse .8s infinite;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.2;}}
 .hbtn{background:transparent;border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.7);border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:var(--body);}
 .hbtn:hover{color:#fff;border-color:rgba(255,255,255,.5);}
@@ -245,7 +246,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
   <header>
     <div class="h-logo">ARGOS<span>OPERATIONS INTELLIGENCE</span></div>
     <div class="h-right">
-      <div class="pulse-row"><div class="pulse"></div><span id="last-update-txt">Loading…</span></div>
+      <div class="pulse-row"><div class="pulse" id="pulse-dot"></div><span id="last-update-txt">Loading…</span></div>
       <button class="hbtn" onclick="refreshData()">↻ Refresh</button>
       <button class="hbtn" onclick="generateReport()" style="border-color:rgba(194,213,0,.4);color:rgba(194,213,0,.9);">↓ Report</button>
       <div style="display:flex;align-items:center;gap:8px;">
@@ -661,7 +662,6 @@ const ALERT_THRESHOLD = 50; // MT
 
 // ── LOCAL STORAGE CACHE ───────────────────────────────────────────
 const CACHE_KEY = 'argos_raw_v3';
-const CACHE_TTL = 8 * 60 * 60 * 1000; // 8 hours
 
 function saveCache() {
   if (!STATE.rawData) return;
@@ -679,7 +679,7 @@ function loadCache() {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw);
-    if (!c.rawData || Date.now() - c.ts > CACHE_TTL) return null;
+    if (!c.rawData) return null;
     return c;
   } catch(e) { return null; }
 }
@@ -691,7 +691,8 @@ const STATE = {
   loadedFromYear: new Date().getFullYear() - 1,
   isLoading: false,
   loadedYears: new Set(),
-  charts: {}
+  charts: {},
+  pollingTimer: null
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -712,6 +713,11 @@ async function _fetchOneYear(year, showErrors, forceRefresh = false) {
     if (resp.status === 504) throw new Error('PA_TIMEOUT');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
+    if (json.regenerating) {
+      startUpdatePolling();
+    } else {
+      stopUpdatePolling();
+    }
     if (!STATE.rawData) {
       STATE.rawData = json;
     } else {
@@ -740,7 +746,22 @@ async function _fetchOneYear(year, showErrors, forceRefresh = false) {
   }
 }
 
-async function loadInitial() {
+function startUpdatePolling() {
+  document.getElementById('pulse-dot').classList.add('updating');
+  document.getElementById('last-update-txt').textContent = '🔄 Updating data in background…';
+  if (STATE.pollingTimer) return;
+  STATE.pollingTimer = setTimeout(async () => {
+    STATE.pollingTimer = null;
+    if (!STATE.isLoading) await silentRefresh();
+  }, 15000);
+}
+
+function stopUpdatePolling() {
+  if (STATE.pollingTimer) { clearTimeout(STATE.pollingTimer); STATE.pollingTimer = null; }
+  document.getElementById('pulse-dot').classList.remove('updating');
+}
+
+async function loadInitial(forceRefresh = false) {
   if (STATE.isLoading) return;
   STATE.isLoading = true;
   const curY = new Date().getFullYear();
@@ -750,8 +771,7 @@ async function loadInitial() {
   STATE.loadedFromYear = curY;
   showLoading(`Loading ${curY} data from SharePoint…`);
   try {
-    // Load current year first — forceRefresh:true bypasses PA cache on manual refresh
-    const ok1 = await _fetchOneYear(curY, true, true);
+    const ok1 = await _fetchOneYear(curY, true, forceRefresh);
     if (ok1) {
       hideLoading();
       const ts = new Date().toLocaleString('en');
@@ -759,9 +779,8 @@ async function loadInitial() {
         `Updated: ${ts} · ${curY} loaded — loading ${curY - 1}…`;
       applyFilters();
     }
-    // Load previous year (more data — may be slower)
     showLoading(`Loading ${curY - 1} data from SharePoint…`);
-    const ok2 = await _fetchOneYear(curY - 1, true, true);
+    const ok2 = await _fetchOneYear(curY - 1, true, forceRefresh);
     if (!ok1 && !ok2) {
       STATE.rawData = prevRawData;
       document.getElementById('last-update-txt').textContent = 'Error — click Refresh to retry';
@@ -800,6 +819,7 @@ async function silentRefresh() {
       clearTimeout(timer);
       if (!resp.ok) return false;
       const json = await resp.json();
+      if (json.regenerating) { startUpdatePolling(); return false; }
       if (!tempData) {
         tempData = json;
       } else {
@@ -875,7 +895,7 @@ async function fetchYear(year, showSpinner) {
 }
 
 function refreshData() {
-  return loadInitial();
+  return loadInitial(true);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -923,12 +943,8 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!STATE.rawData) return; // failed initial load — user must click Refresh manually
     const now = Date.now();
     if (now - _lastVisRefresh < 25 * 60 * 1000) return; // 25-min cooldown between auto-refreshes
-    const cached = loadCache();
-    const age = cached ? now - cached.ts : Infinity;
-    if (age > 30 * 60 * 1000) {
-      _lastVisRefresh = now;
-      silentRefresh();
-    }
+    _lastVisRefresh = now;
+    silentRefresh();
   });
 });
 
@@ -953,7 +969,6 @@ function startApp(name) {
   showLoading('Initializing dashboard…');
 
   const cached = loadCache();
-  // Only use cache if it contains actual sales data for the current year
   const curY = new Date().getFullYear();
   const cacheHasData = cached && Object.values(cached.rawData?.islands || {}).some(
     isl => (isl?.sales || []).some(r => r.date && r.date.startsWith(String(curY)))
@@ -966,7 +981,7 @@ function startApp(name) {
     STATE.loadedYears.add(curY);
     if (cached.loadedFromYear < curY) STATE.loadedYears.add(curY - 1);
     const ts = new Date(cached.ts).toLocaleString('en');
-    document.getElementById('last-update-txt').textContent = `Cached: ${ts} · Refreshing…`;
+    document.getElementById('last-update-txt').textContent = `Cached: ${ts} · Checking for updates…`;
     requestAnimationFrame(() => {
       applyFilters();
       hideLoading();
@@ -1130,7 +1145,16 @@ function parseDayMonth(raw, year) {
 }
 
 function normalizeIslandData(raw, year, islandId) {
-  const pf = v => { const n = parseFloat(String(v ?? '').replace(/,/g,'')); return isNaN(n) ? 0 : n; };
+  const pf = v => {
+    if (typeof v === 'number') return isNaN(v) ? 0 : v;
+    let s = String(v ?? '').trim();
+    if (s === '') return 0;
+    // European decimal (e.g. "1461,1" or "1.461,1") → convert to "1461.1"
+    if (/,\d+$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+    const n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  };
   const pi = v => { const n = parseInt(String(v ?? '')); return isNaN(n) ? 0 : n; };
 
   // Flexible key lookup: finds a key ignoring leading/trailing spaces and case
@@ -1196,6 +1220,13 @@ function normalizeIslandData(raw, year, islandId) {
     return { date, total, localBulk, exportBulk, local21kg, export21kg, local15mt, export15mt, otherType };
   }).filter(Boolean);
 
+  // Deduplicate by date: keep the row with the highest total per day
+  const salesByDate = {};
+  sales.forEach(r => {
+    if (!salesByDate[r.date] || r.total > salesByDate[r.date].total) salesByDate[r.date] = r;
+  });
+  const salesDedup = Object.values(salesByDate).sort((a, b) => a.date.localeCompare(b.date));
+
   // ── Inventory: DATE = "January" … "December" ────────────────────
   const inventory = applyTerminalFilter(raw.inventory || []).map(r => {
     const rawDate = String(getVal(r, ['DATE']) ?? '').trim();
@@ -1220,7 +1251,7 @@ function normalizeIslandData(raw, year, islandId) {
     return { month: `${ry}-${String(monthNum).padStart(2,'0')}`, cifCost, importCost };
   }).filter(Boolean);
 
-  return { sales, inventory, aveCost };
+  return { sales: salesDedup, inventory, aveCost };
 }
 
 // ═══════════════════════════════════════════════════════════════════
