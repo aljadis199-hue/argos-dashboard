@@ -2248,4 +2248,257 @@ function renderAlertBanner(id, inv, sales) {
   const nextHigh = ef && ef.ensemble.length ? ef.ensemble[0].high  : null;
 
   if (lastInv !== null && nextProj !== null) {
+    const remaining = lastInv - nextProj;
+    const worstCase = nextHigh !== null ? lastInv - nextHigh : remaining;
+    if (remaining < ALERT_THRESHOLD) {
+      banner.className = 'show crit';
+      text.innerHTML = `⚠ ALERT ${id}: Inventory (${fmt(lastInv,2)} MT) − Next month projection (${fmt(nextProj,2)} MT) = <strong>${fmt(remaining,2)} MT</strong> — BELOW 50 MT MINIMUM`;
+    } else if (worstCase < ALERT_THRESHOLD) {
+      banner.className = 'show warn';
+      text.innerHTML = `⚡ ATTENTION ${id}: In a pessimistic scenario, coverage drops to <strong>${fmt(worstCase,2)} MT</strong> — near the minimum threshold (base projection: ${fmt(remaining,2)} MT)`;
+    } else if (remaining < ALERT_THRESHOLD * 2) {
+      banner.className = 'show warn';
+      text.innerHTML = `⚡ CAUTION ${id}: Coverage after projected sales: <strong>${fmt(remaining,2)} MT</strong> — approaching the minimum threshold`;
+    } else {
+      banner.className = 'show ok';
+      text.innerHTML = `✓ ${id}: Estimated coverage after projection: ${fmt(remaining,2)} MT — normal level`;
+    }
+  } else {
+    banner.className = '';
+  }
+}
 
+// ═══════════════════════════════════════════════════════════════════
+//  PDF REPORT GENERATOR
+//  Analista Financiero — Protocolo: Diagnóstico · Análisis · Hallazgos · Riesgo · Recomendación
+// ═══════════════════════════════════════════════════════════════════
+function generateRecommendations(id, lastInv, coverageDays, trendDir, trendPct, nextForecast, lastCif, avgCif, salesMonthly) {
+  const recs = [];
+  if (coverageDays !== null) {
+    if (coverageDays < 15)
+      recs.push({ priority:'CRITICAL', color:'#E53E3E', icon:'🔴', text:`Immediate replenishment required for ${id}. Only ${coverageDays} days of inventory remain at current sales pace. Initiate emergency procurement process without delay.` });
+    else if (coverageDays < 30)
+      recs.push({ priority:'HIGH', color:'#D69E2E', icon:'🟠', text:`Schedule replenishment for ${id} within the next ${Math.max(1,coverageDays-15)} days to maintain minimum safety stock of 50 MT. Risk of stockout is elevated.` });
+    else if (coverageDays < 60)
+      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'🟡', text:`Monitor inventory levels for ${id}. Projected coverage of ${coverageDays} days is adequate but approaching the recommended 60-day buffer. Plan next purchase order.` });
+    else
+      recs.push({ priority:'LOW', color:'#00B580', icon:'🟢', text:`Inventory coverage for ${id} is healthy at ${coverageDays} days. Maintain current replenishment schedule and optimize order timing to minimize holding costs.` });
+  }
+  if (trendDir === 'upward' && trendPct > 5)
+    recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'📈', text:`Sales volume is growing approximately ${trendPct.toFixed(1)}% per month. Increase future order volumes proportionally to meet projected demand growth and avoid stockout risk.` });
+  else if (trendDir === 'downward' && trendPct > 5)
+    recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'📉', text:`Sales volume is declining approximately ${trendPct.toFixed(1)}% per month. Investigate root causes — pricing competitiveness, market conditions, or customer churn — and develop a commercial recovery plan.` });
+  if (lastCif !== null && avgCif !== null && avgCif > 0) {
+    const costChg = (lastCif - avgCif) / avgCif * 100;
+    if (costChg > 5)
+      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'💲', text:`Latest CIF cost ($${fmt(lastCif,2)}/MT) is ${costChg.toFixed(1)}% above the period average ($${fmt(avgCif,2)}/MT). Review supplier contracts and explore alternative sourcing options to protect margins.` });
+    else if (costChg < -5)
+      recs.push({ priority:'LOW', color:'#00B580', icon:'💲', text:`Latest CIF cost ($${fmt(lastCif,2)}/MT) is ${Math.abs(costChg).toFixed(1)}% below period average. Favorable market — consider opportunistic forward purchasing to lock in lower costs.` });
+  }
+  if (nextForecast !== null && salesMonthly.length > 0) {
+    const lastM = salesMonthly[salesMonthly.length-1].total;
+    const deltaPct = lastM > 0 ? (nextForecast - lastM) / lastM * 100 : 0;
+    if (Math.abs(deltaPct) > 10)
+      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'🎯', text:`Ensemble forecast projects a ${Math.abs(deltaPct).toFixed(1)}% ${deltaPct>0?'increase':'decrease'} in next month sales (${fmt(nextForecast,2)} MT vs ${fmt(lastM,2)} MT last month). Adjust procurement and logistics capacity accordingly.` });
+  }
+  if (recs.length === 0)
+    recs.push({ priority:'LOW', color:'#00B580', icon:'✅', text:'All key operational metrics are within normal parameters. Continue monitoring the dashboard and maintain current replenishment and sales strategies.' });
+  return recs;
+}
+
+function generateReport() {
+  const id = STATE.activeIsland;
+  const raw = STATE.rawData?.islands?.[id];
+  if (!raw || raw.error) { alert('No data available for current island.'); return; }
+
+  const { year, monthFrom, monthTo } = STATE.filters;
+  const normalized = normalizeIslandData(raw, year, id);
+  const inv      = filterInventory(normalized.inventory, year, monthFrom, monthTo);
+  const cost     = filterCost(normalized.aveCost, year, monthFrom, monthTo);
+  const sales    = aggregateSalesMonthly(normalized.sales, year, monthFrom, monthTo);
+  const allSales = aggregateAllSalesMonthly(normalized.sales);
+
+  const lastInv    = inv.length   ? inv[inv.length-1].value        : null;
+  const totalSales = sales.reduce((s,r)=>s+r.total,0);
+  const totalDays  = sales.reduce((s,r)=>s+r.days,0);
+  const avgDaily   = totalDays>0 ? totalSales/totalDays : 0;
+  const covDays    = avgDaily>0&&lastInv ? Math.round(lastInv/avgDaily) : null;
+  const lastCif    = cost.length ? cost[cost.length-1].cifCost     : null;
+  const avgCif     = cost.length ? cost.reduce((s,r)=>s+r.cifCost,0)/cost.length : null;
+
+  const forecastData = (allSales && allSales.length >= sales.length) ? allSales : sales;
+  const ef         = ensembleForecast(forecastData, 1);
+  const nextForecast = ef?.ensemble?.[0]?.point ?? null;
+  const mapeStr    = ef?.mape!=null ? fmt((1-ef.mape)*100,2)+'%' : 'N/A';
+
+  const reg        = linReg(sales.map(r=>r.total));
+  const trendDir   = reg.slope>0.01?'upward':reg.slope<-0.01?'downward':'flat';
+  const trendLabel = reg.slope>0.01?'Upward ↑':reg.slope<-0.01?'Downward ↓':'Stable →';
+  const trendPct   = sales.length>1&&sales[0].total>0 ? Math.abs(reg.slope/sales[0].total*100) : 0;
+  const invReg     = linReg(inv.map(r=>r.value));
+  const invLabel   = invReg.slope>0.01?'Increasing ↑':invReg.slope<-0.01?'Decreasing ↓':'Stable →';
+  const riskLabel  = covDays===null?'N/A':covDays<15?'🔴 CRITICAL':covDays<30?'🟠 HIGH':covDays<60?'🟡 MEDIUM':'🟢 LOW';
+  const INAMES     = {SXM:'Saint Maarten',USVI:'Saint Thomas (USVI)',ANU:'Antigua & Barbuda',DOM:'Dominica'};
+  const period     = monthFrom===monthTo ? MONTH_NAMES[monthFrom-1]+' '+year
+                     : MONTH_NAMES[monthFrom-1]+' – '+MONTH_NAMES[monthTo-1]+' '+year;
+  const recs       = generateRecommendations(id,lastInv,covDays,trendDir,trendPct,nextForecast,lastCif,avgCif,sales);
+  const now        = new Date().toLocaleString('en');
+
+  const th  = `style="padding:7px 12px;text-align:left;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;"`;
+  const thr = `style="padding:7px 12px;text-align:right;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;"`;
+  const hdr = `style="background:#101B46;color:#fff;"`;
+  const alt = `style="background:#F5F6F7;"`;
+  const td  = (v,extra='')=>`<td style="padding:7px 12px;${extra}">${v}</td>`;
+  const tdb = (v,extra='')=>`<td style="padding:7px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;${extra}">${v}</td>`;
+
+  const sectionHead = (n,title,color)=>
+    `<div class="report-section"><div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;letter-spacing:1px;color:#101B46;border-left:4px solid ${color};padding-left:10px;margin-bottom:12px;">${n}. ${title}</div>`;
+
+  // Chart image capture
+  const chartImg = (canvasId, label) => {
+    const el = document.getElementById(canvasId);
+    if (!el) return '';
+    try {
+      const src = el.toDataURL('image/png');
+      return `<div style="margin-bottom:18px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#4A5568;font-weight:600;margin-bottom:6px;">${label}</div>
+        <img src="${src}" style="width:100%;border-radius:6px;border:1px solid #E2E8F0;">
+      </div>`;
+    } catch(e) { return ''; }
+  };
+
+  const html = `
+<div style="font-family:'Barlow',sans-serif;max-width:860px;margin:0 auto;padding:40px 48px;color:#101B46;">
+  <div style="border-bottom:4px solid #101B46;padding-bottom:16px;margin-bottom:28px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:32px;letter-spacing:4px;">ARGOS</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:11px;letter-spacing:4px;color:#00B580;margin-top:2px;">OPERATIONS INTELLIGENCE</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;margin-top:12px;">OPERATIONS FINANCIAL REPORT — ${id} · ${INAMES[id]||id}</div>
+    <div style="font-size:12px;color:#4A5568;margin-top:4px;">Period: ${period} &nbsp;·&nbsp; Generated: ${now}</div>
+  </div>
+
+  ${sectionHead(1,'EXECUTIVE SUMMARY','#C2D500')}
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>KPI</th><th ${thr}>Value</th><th ${th}>Assessment</th></tr>
+    <tr ${alt}>${td('<strong>Current Inventory</strong>')}${tdb(lastInv!==null?fmt(lastInv,2)+' MT':'N/A')}${td(invLabel,'color:#4A5568;')}</tr>
+    <tr>${td('<strong>Total Sales (period)</strong>')}${tdb(fmt(totalSales,2)+' MT')}${td(sales.length+' month(s) accumulated','color:#4A5568;')}</tr>
+    <tr ${alt}>${td('<strong>Average Daily Sales</strong>')}${tdb(fmt(avgDaily,2)+' MT/day')}${td('Trend: '+trendLabel,'color:#4A5568;')}</tr>
+    <tr>${td('<strong>Estimated Coverage</strong>')}${tdb(covDays!==null?covDays+' days':'N/A',covDays!==null&&covDays<30?'color:#E53E3E;':'')}${td(riskLabel)}</tr>
+    <tr ${alt}>${td('<strong>Next Month Forecast</strong>')}${tdb(nextForecast!==null?fmt(nextForecast,2)+' MT':'N/A')}${td('Model accuracy: '+mapeStr,'color:#4A5568;')}</tr>
+    <tr>${td('<strong>Latest CIF Cost</strong>')}${tdb(lastCif!==null?'$'+fmt(lastCif,2)+'/MT':'N/A')}${td(avgCif!==null?'Period avg: $'+fmt(avgCif,2)+'/MT':'','color:#4A5568;')}</tr>
+  </table></div>
+
+  ${inv.length>0?sectionHead(2,'INVENTORY ANALYSIS','#00B580')+`
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>Month</th><th ${thr}>Inventory (MT)</th><th ${thr}>MoM Change</th><th ${thr}>Coverage Days</th></tr>
+    ${inv.map((r,i)=>{
+      const prev=i>0?inv[i-1].value:null;
+      const chg=prev!==null?r.value-prev:null;
+      const pct=prev&&prev>0?chg/prev*100:null;
+      const cov=avgDaily>0?Math.round(r.value/avgDaily):null;
+      const bg=i%2===0?'background:#F5F6F7;':'';
+      const mLabel=MONTH_NAMES[parseInt(r.month.split('-')[1])-1]+' '+r.month.split('-')[0];
+      return`<tr style="${bg}">${td('<strong>'+mLabel+'</strong>')}${tdb(fmt(r.value,2))}
+        ${td(chg!==null?(chg>=0?'+':'')+fmt(chg,2)+(pct!==null?' ('+( chg>=0?'+':'')+pct.toFixed(1)+'%)':''):'—',chg!==null?(chg>=0?'color:#00B580;':'color:#E53E3E;')+'text-align:right;':'text-align:right;')}
+        ${td(cov!==null?cov+'d':'—','text-align:right;'+(cov!==null&&cov<30?'color:#E53E3E;font-weight:700;':''))}
+      </tr>`;
+    }).join('')}
+  </table></div>`:''}
+
+  ${sales.length>0?sectionHead(3,'SALES PERFORMANCE','#3182CE')+`
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>Month</th><th ${thr}>Total (MT)</th><th ${thr}>MoM Δ</th><th ${thr}>Local Bulk</th><th ${thr}>Export Bulk</th><th ${thr}>Local 21kg</th></tr>
+    ${sales.map((r,i)=>{
+      const prev=i>0?sales[i-1].total:null;
+      const chg=prev!==null?r.total-prev:null;
+      const pct=prev&&prev>0?chg/prev*100:null;
+      const bg=i%2===0?'background:#F5F6F7;':'';
+      const mLabel=MONTH_NAMES[parseInt(r.month.split('-')[1])-1]+' '+r.month.split('-')[0];
+      return`<tr style="${bg}">${td('<strong>'+mLabel+'</strong>')}${tdb(fmt(r.total,2))}
+        ${td(chg!==null?(chg>=0?'+':'')+fmt(chg,2)+(pct!==null?' ('+pct.toFixed(1)+'%)':''):'—',chg!==null?(chg>=0?'color:#00B580;':'color:#E53E3E;')+'text-align:right;':'text-align:right;')}
+        ${td(fmt(r.localBulk,2),'text-align:right;')}${td(fmt(r.exportBulk,2),'text-align:right;')}${td(fmt(r.local21kg,2),'text-align:right;')}
+      </tr>`;
+    }).join('')}
+    <tr style="background:#101B46;color:#fff;">
+      <td style="padding:7px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;">TOTAL</td>
+      <td style="padding:7px 12px;text-align:right;font-family:'Barlow Condensed',sans-serif;font-weight:800;">${fmt(totalSales,2)} MT</td>
+      <td colspan="4" style="padding:7px 12px;text-align:right;font-size:11px;">Trend: ${trendLabel} · Avg: ${fmt(avgDaily,2)} MT/day</td>
+    </tr>
+  </table></div>`:''}
+
+  ${sectionHead(4,'FORECAST &amp; PROJECTIONS','#D69E2E')}
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr ${hdr}><th ${th}>Metric</th><th ${thr}>Value</th></tr>
+    <tr ${alt}>${td('<strong>Next Month Sales Forecast</strong>')}${tdb(nextForecast!==null?fmt(nextForecast,2)+' MT':'N/A','text-align:right;')}</tr>
+    <tr>${td('<strong>Forecast Model Used</strong>')}${td(ef?.model??'N/A','text-align:right;color:#4A5568;')}</tr>
+    <tr ${alt}>${td('<strong>Model Accuracy (MAPE)</strong>')}${td(mapeStr,'text-align:right;color:#4A5568;')}</tr>
+    <tr>${td('<strong>Inventory Post-Projection</strong>')}${tdb(lastInv!==null&&nextForecast!==null?fmt(lastInv-nextForecast,1)+' MT':'N/A','text-align:right;'+(lastInv!==null&&nextForecast!==null&&(lastInv-nextForecast)<50?'color:#E53E3E;':''))}</tr>
+  </table></div>
+
+  ${sectionHead(5,'RISK ASSESSMENT','#E53E3E')}
+  <div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;line-height:1.9;margin-bottom:4px;">
+    <div><strong>Coverage Risk:</strong> ${riskLabel} — ${covDays!==null?covDays+' days remaining at current average daily sales pace':'Cannot calculate — inventory or sales data unavailable'}</div>
+    <div><strong>Sales Trend:</strong> ${trendLabel}${trendPct>5?' ('+trendPct.toFixed(1)+'% avg monthly change)':''}</div>
+    <div><strong>Inventory Trend:</strong> ${invLabel}</div>
+    ${lastInv!==null&&nextForecast!==null&&(lastInv-nextForecast)<50?'<div style="color:#E53E3E;font-weight:700;margin-top:6px;">⚠ CRITICAL: Post-projection inventory falls below the 50 MT minimum safety threshold. Immediate action required.</div>':''}
+  </div></div>
+
+  ${sectionHead(6,'STRATEGIC RECOMMENDATIONS','#6B46C1')}
+  ${recs.map(r=>`
+    <div style="display:flex;gap:12px;padding:10px 14px;margin-bottom:8px;background:#F5F6F7;border-radius:6px;border-left:3px solid ${r.color};">
+      <div style="font-size:16px;flex-shrink:0;">${r.icon}</div>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;color:#4A5568;margin-bottom:3px;">${r.priority} PRIORITY</div>
+        <div style="font-size:12px;line-height:1.6;">${r.text}</div>
+      </div>
+    </div>`).join('')}
+  </div>
+
+  ${sectionHead(7,'CHARTS SNAPSHOT','#101B46')}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+    <div>
+      ${chartImg('chart-inv-'+id, 'Monthly Inventory (MT)')}
+      ${chartImg('chart-sales-line-'+id, 'Total Sales Trend')}
+      ${chartImg('chart-daily-'+id, 'Daily Sales Movement')}
+    </div>
+    <div>
+      ${chartImg('chart-cif-'+id, 'CIF Import Cost (USD/MT)')}
+      ${chartImg('chart-products-'+id, 'Sales by Product')}
+      ${chartImg('chart-proj-'+id, 'Sales Projections & Forecast')}
+    </div>
+  </div>
+  </div>
+
+  <div style="border-top:2px solid #E2E8F0;padding-top:12px;margin-top:12px;font-size:10px;color:#718096;display:flex;justify-content:space-between;">
+    <div>ARGOS Operations Intelligence — ${id} · ${INAMES[id]||id} — VP RCCA Caribbean Terminals</div>
+    <div>Generated ${now} · Confidential</div>
+  </div>
+</div>`;
+
+  const overlay = document.getElementById('print-overlay');
+  overlay.innerHTML = html;
+  overlay.style.display = 'block';
+  setTimeout(() => window.print(), 80);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function showLoading(msg) {
+  document.getElementById('loading-text').textContent = msg || 'Loading…';
+  document.getElementById('loading').classList.add('show');
+}
+function hideLoading() { document.getElementById('loading').classList.remove('show'); }
+
+function showError(msg) {
+  const banner = document.getElementById('alert-banner');
+  document.getElementById('alert-text').innerHTML = '⚠ ' + msg;
+  banner.className = 'show crit';
+}
+
+function fmt(v, decimals = 2) {
+  if (v === null || v === undefined || isNaN(v)) return 'N/A';
+  return Number(v).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+</script>
+</body>
+</html>
