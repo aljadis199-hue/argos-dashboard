@@ -135,6 +135,12 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
 .kpi-sm-value.small{font-size:14px;}
 .kpi-sm-sub{font-size:9px;color:var(--muted);margin-top:2px;}
 
+/* ── KPI TOOLTIPS ── */
+.kpi,.kpi-sm{position:relative;cursor:help;}
+.kpi[data-tt]::after,.kpi-sm[data-tt]::after{content:attr(data-tt);position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%) translateY(4px);background:var(--navy);color:#fff;padding:12px 16px;border-radius:8px;font-size:11px;font-weight:400;width:280px;text-align:left;line-height:1.55;font-family:var(--body);text-transform:none;letter-spacing:0;opacity:0;pointer-events:none;transition:opacity .22s, transform .22s;z-index:200;box-shadow:0 8px 24px rgba(16,27,70,.35);white-space:normal;}
+.kpi[data-tt]::before,.kpi-sm[data-tt]::before{content:'';position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%) translateY(4px);border:6px solid transparent;border-top-color:var(--navy);opacity:0;pointer-events:none;transition:opacity .22s, transform .22s;z-index:201;}
+.kpi[data-tt]:hover::after,.kpi-sm[data-tt]:hover::after,.kpi[data-tt]:hover::before,.kpi-sm[data-tt]:hover::before{opacity:1;transform:translateX(-50%) translateY(0);}
+
 /* ── CHART GRID ── */
 .chart-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
 .chart-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
@@ -315,6 +321,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <button class="itab" id="tab-USVI" onclick="switchIsland('USVI')">USVI</button>
       <button class="itab" id="tab-ANU" onclick="switchIsland('ANU')">ANU</button>
       <button class="itab" id="tab-DOM" onclick="switchIsland('DOM')">DOM</button>
+      <button class="itab" id="tab-barcos" onclick="switchBarcos()" style="border-left:3px solid #3182CE;margin-left:8px;">&#9972; Next Ship</button>
     </div>
 
     <!-- SXM SECTION -->
@@ -476,7 +483,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <div id="pending-ANU" class="pending-card">
         <div class="pending-icon">📂</div>
         <div class="pending-title">ANU — Antigua &amp; Barbuda</div>
-        <div class="pending-sub">No file — No data available for this terminal in the selected period.<br>The dashboard will activate automatically when data is loaded.</div>
+        <div class="pending-sub">No data available for this terminal in the selected period.<br>Check browser console (F12) for diagnostic details · The dashboard activates automatically when data is loaded into SharePoint.</div>
       </div>
       <div id="charts-ANU" style="display:none;">
         <div class="kpi-row" id="kpi-ANU"></div>
@@ -560,7 +567,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <div id="pending-DOM" class="pending-card">
         <div class="pending-icon">📂</div>
         <div class="pending-title">DOM — Dominica</div>
-        <div class="pending-sub">No file — No data available for this terminal in the selected period.<br>The dashboard will activate automatically when data is loaded.</div>
+        <div class="pending-sub">No data available for this terminal in the selected period.<br>Check browser console (F12) for diagnostic details · The dashboard activates automatically when data is loaded into SharePoint.</div>
       </div>
       <div id="charts-DOM" style="display:none;">
         <div class="kpi-row" id="kpi-DOM"></div>
@@ -638,6 +645,20 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
         </div>
       </div>
     </div>
+
+    <!-- ══════════════ FLEET / BARCOS SECTION ══════════════ -->
+    <div id="section-barcos" class="island-section">
+      <!-- KPI row — populated by loadFleetData() -->
+      <div id="fleet-kpis" class="kpi-metrics-grid" style="margin-bottom:14px;">
+        <div class="kpi" style="grid-column:1/-1;color:var(--muted);text-align:center;padding:24px;">
+          Cargando datos de flota...
+        </div>
+      </div>
+      <!-- Island risk cards — populated by loadFleetData() -->
+      <div id="fleet-islands" class="chart-grid-2" style="grid-template-columns:repeat(4,1fr);"></div>
+      <!-- Voyages table — populated by loadFleetData() -->
+      <div id="fleet-table-card" class="chart-card"></div>
+    </div><!-- /section-barcos -->
 
   </main>
 </div>
@@ -1028,8 +1049,14 @@ function applyFilters() {
   STATE.filters.monthTo   = parseInt(document.getElementById('f-month-to').value);
   STATE.filters.product   = document.getElementById('f-product').value;
   const island = document.getElementById('f-island').value;
-  if (island !== STATE.activeIsland) switchIsland(island);
-  if (STATE.rawData) renderIsland(STATE.activeIsland);
+  const fleetActive = document.getElementById('section-barcos').classList.contains('active');
+  if (!fleetActive) {
+    if (island !== STATE.activeIsland) switchIsland(island);
+    if (STATE.rawData) renderIsland(STATE.activeIsland);
+  }
+  if (STATE.fleetData && fleetActive) {
+    renderFleetData(STATE.fleetData);
+  }
 }
 
 function resetFilters() {
@@ -1055,22 +1082,216 @@ function switchIsland(id) {
   if (STATE.rawData) renderIsland(id);
 }
 
+function switchBarcos() {
+  document.querySelectorAll('.island-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.itab').forEach(t => t.classList.remove('active'));
+  document.getElementById('section-barcos').classList.add('active');
+  document.getElementById('tab-barcos').classList.add('active');
+  loadFleetData();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  FLEET DATA — Power Automate HTTP trigger → Azure SQL NextShipHistory
+// ═══════════════════════════════════════════════════════════════════
+function loadFleetData() {
+  if (!ARGOS_CONFIG.FLEET_FLOW_URL || ARGOS_CONFIG.FLEET_FLOW_URL.includes('REEMPLAZAR')) {
+    renderFleetError('Configura FLEET_FLOW_URL en config.js');
+    return;
+  }
+  fetch(ARGOS_CONFIG.FLEET_FLOW_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ action: 'getFleet' })
+  })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => { STATE.fleetData = data; renderFleetData(data); })
+    .catch(e => renderFleetError(String(e)));
+}
+
+function renderFleetData(data) {
+  const { year, monthFrom, monthTo } = STATE.filters;
+  const selIsland = document.getElementById('f-island').value;
+  const fleetIsland = selIsland === 'USVI' ? 'STT' : selIsland;
+  const all = deduplicateVoyages(data.voyages || []);
+  const voyages = all.filter(v => {
+    if (v.idIsland !== fleetIsland) return false;
+    if (!v.operationStart) return true;
+    const d = new Date(v.operationStart);
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    return y === year && m >= monthFrom && m <= monthTo;
+  });
+  const updated = data.updated ? new Date(data.updated).toLocaleString('es-ES') : '—';
+
+  const active  = voyages.filter(v => fleetIsActive(v.state));
+  const delayed = voyages.filter(v => fleetIsDelayed(v.state));
+  const maxRisk = voyages.reduce((m, v) => Math.max(m, parseFloat(v.stockoutrisk) || 0), 0);
+  const totalTons   = active.reduce((s, v)  => s + (parseFloat(v.tons) || 0), 0);
+  const delayedTons = delayed.reduce((s, v) => s + (parseFloat(v.tons) || 0), 0);
+  const next = [...voyages].sort((a, b) => new Date(b.ea) - new Date(a.ea))[0];
+  const maxVessel = voyages.find(v => (parseFloat(v.stockoutrisk) || 0) === maxRisk);
+
+  const rColor = maxRisk >= 80 ? 'var(--red)' : maxRisk >= 50 ? 'var(--yellow)' : 'var(--green)';
+  const rClass = maxRisk >= 80 ? 'crit' : maxRisk >= 50 ? 'warn' : '';
+
+  document.getElementById('fleet-kpis').innerHTML = `
+    <div class="kpi info">
+      <div class="kpi-label">Active Voyages</div>
+      <div class="kpi-value" style="font-size:28px;">${active.length}</div>
+      <div class="kpi-sub">SXM / DOM / ANU / STT</div>
+    </div>
+    <div class="kpi ${rClass}">
+      <div class="kpi-label">Max Stockout Risk</div>
+      <div class="kpi-value" style="color:${rColor};">${maxRisk.toFixed(1)}%</div>
+      <div class="kpi-sub">${maxVessel ? maxVessel.idIsland + ' · ' + maxVessel.name : '—'}</div>
+    </div>
+    <div class="kpi lime">
+      <div class="kpi-label">Tons in Transit</div>
+      <div class="kpi-value">${totalTons.toLocaleString()}</div>
+      <div class="kpi-sub">Voyages activos · 4 islands</div>
+    </div>
+    <div class="kpi ${delayed.length > 0 ? 'warn' : ''}">
+      <div class="kpi-label">Delayed Voyages</div>
+      <div class="kpi-value" style="color:${delayed.length > 0 ? 'var(--yellow)' : 'inherit'};">${delayed.length}</div>
+      <div class="kpi-sub">${delayedTons.toLocaleString()} t affected</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Next Arrival</div>
+      <div class="kpi-value small">${next ? next.name : '—'}</div>
+      <div class="kpi-sub">${next ? next.idIsland + ' · ' + fleetFmtDate(next.ea) + ' · ' + (parseFloat(next.tons) || 0).toLocaleString() + ' t' : '—'}</div>
+    </div>
+    <div class="kpi purple">
+      <div class="kpi-label">Data Updated</div>
+      <div class="kpi-value small" style="font-size:12px;padding-top:4px;">${updated}</div>
+      <div class="kpi-sub">Azure SQL · Power Automate</div>
+    </div>`;
+
+  const ISL_NAMES = { SXM: 'St. Maarten', DOM: 'Dominica', ANU: 'Antigua', STT: 'St. Thomas' };
+  document.getElementById('fleet-islands').innerHTML = [fleetIsland].map(isl => {
+    const iv = voyages.filter(v => v.idIsland === isl);
+    const mr = iv.reduce((m, v) => Math.max(m, parseFloat(v.stockoutrisk) || 0), 0);
+    const tv = iv.find(v => (parseFloat(v.stockoutrisk) || 0) === mr);
+    const c  = mr >= 80 ? 'var(--red)' : mr >= 50 ? 'var(--yellow)' : 'var(--green)';
+    const bc = mr >= 80 ? 'alert' : mr >= 50 ? 'warn' : '';
+    const tag = mr >= 80 ? 'CRITICAL' : mr >= 50 ? 'HIGH' : 'NORMAL';
+    const ts  = mr >= 50 && mr < 80 ? 'style="background:rgba(214,158,46,.12);color:var(--yellow);"' : '';
+    return `<div class="chart-card" style="border-top:3px solid ${c};">
+      <div class="chart-header">
+        <div><div class="chart-title">${isl} — ${ISL_NAMES[isl]}</div>
+        <div class="chart-sub">${tv ? (tv.inventory_name || tv.type || '') : 'Sin datos'}</div></div>
+        <span class="chart-badge ${bc}">${mr.toFixed(1)}% RISK</span>
+      </div>
+      <div style="font-family:var(--display);font-weight:800;font-size:32px;color:${c};margin:4px 0;">${mr.toFixed(1)}%</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">${tv ? tv.name + ' &nbsp;·&nbsp; ' + fleetFmtDate(tv.ea) + ' &nbsp;·&nbsp; ' + (parseFloat(tv.tons)||0).toLocaleString() + ' t' : '—'}</div>
+      <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden;">
+        <div style="width:${Math.min(mr,100)}%;height:100%;background:${c};border-radius:4px;"></div>
+      </div>
+      <div style="margin-top:8px;"><span class="alert-tag" ${ts}>${tag}</span></div>
+    </div>`;
+  }).join('');
+
+  const stateTag = s => {
+    if (s === 1 || s === '1' || (typeof s === 'string' && s.toLowerCase().includes('transit')))
+      return '<span class="ok-tag">In Transit</span>';
+    if (s === 2 || s === '2' || (typeof s === 'string' && s.toLowerCase().includes('delay')))
+      return '<span class="alert-tag">Delayed</span>';
+    return `<span class="ok-tag">${s}</span>`;
+  };
+  const riskTag = r => {
+    const n = parseFloat(r) || 0;
+    if (n >= 80) return `<span class="alert-tag">${n.toFixed(2)}%</span>`;
+    if (n >= 50) return `<span class="alert-tag" style="background:rgba(214,158,46,.12);color:var(--yellow);">${n.toFixed(2)}%</span>`;
+    return `<span class="ok-tag">${n.toFixed(2)}%</span>`;
+  };
+
+  document.getElementById('fleet-table-card').innerHTML = `
+    <div class="chart-header">
+      <div>
+        <div class="chart-title">Island Voyages — SXM · DOM · ANU · STT</div>
+        <div class="chart-sub">Azure SQL · Power Automate · ${voyages.length} registros · ${updated}</div>
+      </div>
+      <span class="chart-badge" style="background:rgba(49,130,206,.1);color:var(--blue);">&#9972; Fleet Data</span>
+    </div>
+    <table class="proj-table">
+      <thead><tr>
+        <th>Island</th><th>Vessel</th><th>Type</th><th>Tons</th>
+        <th>Op. Start</th><th>Op. End</th><th>Stockout Risk</th><th>State</th>
+      </tr></thead>
+      <tbody>${voyages.map(v => `
+        <tr>
+          <td>${v.idIsland || ''}</td>
+          <td>${v.name || ''}</td>
+          <td>${v.type || ''}</td>
+          <td class="val">${(parseFloat(v.tons) || 0).toLocaleString()}</td>
+          <td>${fleetFmtDateTime(v.operationStart)}</td>
+          <td>${fleetFmtDateTime(v.operationComplete)}</td>
+          <td>${riskTag(v.stockoutrisk)}</td>
+          <td>${stateTag(v.state)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function deduplicateVoyages(voyages) {
+  const seen = new Map();
+  [...voyages]
+    .sort((a, b) => (parseInt(b.id) || 0) - (parseInt(a.id) || 0))
+    .forEach(v => {
+      const key = `${v.name}|${v.idIsland}|${(v.ea || '').substring(0, 10)}`;
+      if (!seen.has(key)) seen.set(key, v);
+    });
+  return [...seen.values()].sort((a, b) => new Date(b.ea) - new Date(a.ea));
+}
+
+function fleetIsActive(s) {
+  return s === 1 || s === '1' || (typeof s === 'string' && s.toLowerCase().includes('transit'));
+}
+function fleetIsDelayed(s) {
+  return s === 2 || s === '2' || (typeof s === 'string' && s.toLowerCase().includes('delay'));
+}
+function fleetFmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+function fleetFmtDateTime(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    + ' ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+function renderFleetError(msg) {
+  const txt = msg || 'Error al conectar con el flow de Power Automate';
+  document.getElementById('fleet-kpis').innerHTML =
+    `<div class="kpi" style="grid-column:1/-1;color:var(--muted);text-align:center;padding:24px;">&#9888; ${txt}</div>`;
+  document.getElementById('fleet-islands').innerHTML = '';
+  document.getElementById('fleet-table-card').innerHTML = '';
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  RENDER ISLAND
 // ═══════════════════════════════════════════════════════════════════
 function renderIsland(id) {
   const islands = STATE.rawData?.islands;
   if (!islands || !islands[id]) {
+    console.warn(`[Dashboard] ${id}: no data in STATE.rawData.islands — PA may not have returned this island`);
     renderPending(id);
     return;
   }
   const raw = islands[id];
-  if (!raw || raw.error) { renderPending(id); return; }
+  if (!raw || raw.error) {
+    console.warn(`[Dashboard] ${id}: raw data missing or error —`, raw?.error ?? 'null');
+    renderPending(id);
+    return;
+  }
+
+  console.log(`[Dashboard] ${id}: raw rows → sales=${raw.sales?.length ?? 0}, inventory=${raw.inventory?.length ?? 0}, aveCost=${raw.aveCost?.length ?? 0}`);
 
   const { year, monthFrom, monthTo, product } = STATE.filters;
 
   // Normalize raw Excel column names → internal field names, filtered by island Terminal column
   const normalized = normalizeIslandData(raw, year, id);
+
+  console.log(`[Dashboard] ${id}: normalized → sales=${normalized.sales.length}, inventory=${normalized.inventory.length}, aveCost=${normalized.aveCost.length}`);
 
   // For islands with conditional chart sections (ANU/DOM): show charts or pending card
   const pendingEl = document.getElementById('pending-' + id);
@@ -1079,7 +1300,30 @@ function renderIsland(id) {
     const hasData = normalized.sales.length > 0 || normalized.inventory.length > 0 || normalized.aveCost.length > 0;
     pendingEl.style.display = hasData ? 'none' : 'block';
     chartsEl.style.display  = hasData ? 'block' : 'none';
-    if (!hasData) return;
+    if (!hasData) {
+      // Show inline diagnostic in the pending card
+      const rawSales = raw.sales?.length ?? 0;
+      const rawInv   = raw.inventory?.length ?? 0;
+      const rawCost  = raw.aveCost?.length ?? 0;
+      const sampleTerminals = (raw.sales || []).slice(0,5).map(r => {
+        const t = r['Terminal'] ?? r['TERMINAL'] ?? r['terminal'] ?? '(none)';
+        return String(t).trim();
+      }).filter((v,i,a) => a.indexOf(v) === i).join(', ') || '(no Terminal col)';
+      const sampleDate = raw.sales?.[0] ? String(raw.sales[0]['DATE'] ?? raw.sales[0]['date'] ?? '(no DATE col)') : '';
+      const sampleTotal = raw.sales?.[0] ? String(raw.sales[0]['sales por day TOTAL'] ?? '(no TOTAL col)') : '';
+      const colKeys = raw.sales?.[0] ? Object.keys(raw.sales[0]).slice(0,8).join(', ') : '(empty)';
+      const normSales = normalized.sales.length;
+      const normInv   = normalized.inventory.length;
+      const normCost  = normalized.aveCost.length;
+      const subEl = pendingEl.querySelector('.pending-sub');
+      if (subEl) subEl.innerHTML =
+        `<strong>Diagnostic ${id}:</strong> PA raw: ${rawSales} sales / ${rawInv} inv / ${rawCost} cost · After normalize: ${normSales} / ${normInv} / ${normCost}<br>` +
+        `Terminal values: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">${sampleTerminals}</code><br>` +
+        `First row — DATE: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">${sampleDate}</code>  TOTAL: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">${sampleTotal}</code><br>` +
+        `Columns: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:10px">${colKeys}</code>`;
+      console.warn(`[Dashboard] ${id}: hasData=false — raw: sales=${rawSales}, inv=${rawInv}, cost=${rawCost}, terminals=[${sampleTerminals}], normSales=${normSales}`);
+      return;
+    }
   }
 
   // Filter inventory by year and month range
@@ -1094,10 +1338,10 @@ function renderIsland(id) {
   renderInventoryChart(id, inv);
   renderCIFChart(id, cost);
   renderImportChart(id, cost);
-  renderSalesLineChart(id, salesMonthly, product);
+  renderSalesLineChart(id, salesMonthly, product, allSalesMonthly);
   renderSalesPieChart(id, salesMonthly);
   renderProductsChart(id, salesMonthly);
-  renderProjectionsChart(id, salesMonthly, product);
+  renderProjectionsChart(id, salesMonthly, product, allSalesMonthly);
   renderDailySalesChart(id, normalized.sales, year, monthFrom, monthTo);
   renderProjTable(id, inv, salesMonthly, allSalesMonthly);
   renderAlertBanner(id, inv, allSalesMonthly);
@@ -1172,8 +1416,10 @@ function normalizeIslandData(raw, year, islandId) {
   const rowYear = r => pi(getVal(r, ['Column1','Year','YEAR','Año','AÑO','year','año','column1'])) || year;
 
   // Terminal filter: include rows matching the active island.
-  // Fallback: if filtering removes ALL rows from a non-empty array, use all rows
-  // (handles Excel files where Terminal column hasn't been updated per island yet)
+  // PA (post E1.13) already separates data per island before sending — rows arrive in
+  // islands[id] buckets, so the Terminal column is a best-effort hint, not authoritative.
+  // Strategy: use rows that explicitly match → fall back to all rows if none match
+  // (covers: no Terminal column, wrong/legacy values, PA template reuse from SXM).
   const KNOWN_ISLANDS = ['ANU','DOM','SXM','USVI'];
   const terminalOk = r => {
     const t = getVal(r, ['Terminal','TERMINAL','terminal']);
@@ -1186,22 +1432,23 @@ function normalizeIslandData(raw, year, islandId) {
   };
   const applyTerminalFilter = rows => {
     const filtered = rows.filter(terminalOk);
+    // If Terminal filter yields zero results, trust the PA island bucket and use all rows.
+    // This handles Excel files where Terminal column has the wrong island code (e.g. still
+    // set to "SXM" on ANU/DOM files) — PA already filtered correctly server-side.
     if (filtered.length === 0 && rows.length > 0) {
-      // Only fall back to all rows if NO row has any known-island Terminal value.
-      // If rows have Terminal values from another known island → wrong island data → return empty.
-      const hasKnownTerminal = rows.some(r => {
-        const t = getVal(r, ['Terminal','TERMINAL','terminal']);
-        if (t === undefined || t === null) return false;
-        return KNOWN_ISLANDS.includes(String(t).trim().toUpperCase());
-      });
-      if (!hasKnownTerminal) return rows; // no Terminal column → legacy fallback
-      return [];                          // wrong island's data → show "No file"
+      console.warn(`[Dashboard] ${islandId}: Terminal filter matched 0/${rows.length} rows — using all rows (Terminal column may have wrong island value in Excel)`);
+      return rows;
     }
     return filtered;
   };
 
   // ── Sales: DATE = serial or "D-M" ────────────────────────────────
-  const sales = applyTerminalFilter(raw.sales || []).map(r => {
+  const _salesFiltered = applyTerminalFilter(raw.sales || []);
+  if (islandId === 'ANU' || islandId === 'DOM') {
+    const _r0 = _salesFiltered[0];
+    console.log(`[Dashboard] ${islandId} sales filter→map: ${_salesFiltered.length} rows. First row DATE="${_r0 ? (getVal(_r0,['DATE']) ?? '(none)') : 'N/A'}", TOTAL="${_r0 ? (getVal(_r0,['sales por day TOTAL']) ?? '(none)') : 'N/A'}", keys=${_r0 ? JSON.stringify(Object.keys(_r0).slice(0,6)) : 'N/A'}`);
+  }
+  const sales = _salesFiltered.map(r => {
     const dateRaw = getVal(r, ['DATE']);
     const date = parseDayMonth(dateRaw, rowYear(r));
     if (!date) return null;
@@ -1387,7 +1634,7 @@ function renderKPIs(id, inv, cost, sales, raw) {
   const prevMonth = sales.length > 1 ? sales[sales.length-2] : null;
   const momGrowth = prevMonth && prevMonth.total > 0 ? ((lastMonth.total - prevMonth.total)/prevMonth.total*100) : null;
   const momClass  = momGrowth===null?'neu':momGrowth>=0?'pos':'neg';
-  const momStr    = momGrowth!==null ? (momGrowth>=0?'+':'')+momGrowth.toFixed(1)+'%' : 'N/A';
+  const momStr    = momGrowth!==null ? (momGrowth>=0?'+':'')+momGrowth.toFixed(2)+'%' : 'N/A';
 
   // Monthly average
   const avgMonthly = sales.length ? totalSales/sales.length : 0;
@@ -1413,70 +1660,70 @@ function renderKPIs(id, inv, cost, sales, raw) {
 
   document.getElementById('kpi-'+id).innerHTML = `
   <div class="kpi-grid">
-    <div class="kpi ${invClass}">
+    <div class="kpi ${invClass}" data-tt="Latest reported cement inventory level in metric tons (MT) for the selected island. Sourced from the most recent month available in SharePoint. Turns red and shows CRITICAL COVERAGE when estimated days of coverage falls below the warning threshold.">
       <div class="kpi-label">Current Inventory</div>
       <div class="kpi-value ${lastInv>9999?'small':''}">${lastInv !== null ? fmt(lastInv) : 'N/A'}</div>
       <div class="kpi-sub">MT · latest available month</div>
       ${invClass==='crit'?'<div style="color:var(--red);font-size:10px;font-weight:700;margin-top:2px;">⚠ CRITICAL COVERAGE</div>':''}
     </div>
-    <div class="kpi info">
+    <div class="kpi info" data-tt="Sum of all sales transactions across all product types within the date range selected in the Filter Bar. Aggregates daily transactions filtered by year and month range. Shows total volume moved during the analyzed window.">
       <div class="kpi-label">Total Sales (period)</div>
       <div class="kpi-value small">${fmt(totalSales)}</div>
       <div class="kpi-sub">MT accumulated · ${sales.length} month(s)</div>
     </div>
-    <div class="kpi">
+    <div class="kpi" data-tt="Average historical daily sales volume in MT per day. Calculated by dividing total period sales by the number of days. This is the key driver for the Estimated Coverage calculation.">
       <div class="kpi-label">Daily Average</div>
-      <div class="kpi-value">${fmt(avgDaily,1)}</div>
+      <div class="kpi-value">${fmt(avgDaily,2)}</div>
       <div class="kpi-sub">MT/day historical</div>
     </div>
-    <div class="kpi ${covClass}">
+    <div class="kpi ${covClass}" data-tt="Number of days the current inventory will last at the historical daily sales pace. Bar fills red below 15 days, yellow below 30 days, green otherwise. The most important alert metric in the dashboard.">
       <div class="kpi-label">Estimated Coverage</div>
       <div class="kpi-value">${coverageDays !== null ? coverageDays+'d' : 'N/A'}</div>
       <div class="kpi-sub">Days at current pace</div>
       ${coverageDays!==null?`<div class="coverage-bar"><div class="coverage-fill" style="width:${Math.min(100,coverageDays/90*100)}%;background:${coverageDays<15?'var(--red)':coverageDays<30?'var(--yellow)':'var(--teal)'}"></div></div>`:''}
     </div>
-    <div class="kpi purple">
+    <div class="kpi purple" data-tt="Most recent CIF (Cost, Insurance and Freight) value reported in USD per metric ton. Reflects the landed import cost. The subtitle shows the unit Import value in USD per MT without insurance or freight.">
       <div class="kpi-label">Latest CIF Cost</div>
       <div class="kpi-value small">${lastCif !== null ? '$'+fmt(lastCif,2) : 'N/A'}</div>
       <div class="kpi-sub">Import: ${lastImp !== null ? '$'+fmt(lastImp,2) : 'N/A'} USD/MT</div>
     </div>
-    <div class="kpi lime">
-      <div class="kpi-label">Latest Month Sales</div>
+    <div class="kpi lime" data-tt="Total sales volume for the latest available month in MT. The subtitle shows which specific month this value corresponds to. Useful for quick comparison against the monthly average to detect anomalies.">
+      <div class="kpi-label">Month Sales</div>
       <div class="kpi-value small">${lastMonthSales !== null ? fmt(lastMonthSales) : 'N/A'}</div>
       <div class="kpi-sub">MT · ${lastMonthLabel}</div>
     </div>
   </div>
   <div class="kpi-metrics-grid">
-    <div class="kpi-sm ${momClass}">
+    <div class="kpi-sm ${momClass}" data-tt="Month-over-Month percentage change in total sales from the previous month to the current month. Negative values appear in red, positive in green. Note: comparing an incomplete current month against a full previous month will show artificially negative growth.">
       <div class="kpi-sm-label">MoM Growth</div>
       <div class="kpi-sm-value" style="${momGrowth!==null?(momGrowth>=0?'color:var(--teal);':'color:var(--red);'):''}">
         ${momStr}
       </div>
       <div class="kpi-sm-sub">${prevMonth?MONTH_NAMES[parseInt(prevMonth.month.split('-')[1])-1]+' → '+lastMonthLabel:'vs previous month'}</div>
     </div>
-    <div class="kpi-sm neu">
+    <div class="kpi-sm neu" data-tt="Average sales volume per month within the selected period in MT per month. Calculated by dividing total period sales by the number of months. Provides a baseline to evaluate whether any specific month was above or below typical performance.">
       <div class="kpi-sm-label">Monthly Average</div>
-      <div class="kpi-sm-value">${fmt(avgMonthly,1)}</div>
+      <div class="kpi-sm-value">${fmt(avgMonthly,2)}</div>
       <div class="kpi-sm-sub">MT/month · ${sales.length} period</div>
     </div>
-    <div class="kpi-sm neu">
+    <div class="kpi-sm neu" data-tt="Projected annual sales volume if the current daily pace continued for a full year (365 days). Calculated as Daily Average multiplied by 365. Useful for budgeting and capacity planning, but should be interpreted with seasonality in mind.">
       <div class="kpi-sm-label">Annualized Run Rate</div>
       <div class="kpi-sm-value small">${fmt(runRate)} MT</div>
       <div class="kpi-sm-sub">avg daily × 365</div>
     </div>
-    <div class="kpi-sm gold">
+    <div class="kpi-sm gold" data-tt="The highest single-month sales volume within the selected period. The subtitle shows which month achieved this peak. Helps identify seasonal high points and benchmark targets for future months.">
       <div class="kpi-sm-label">Best Month</div>
-      <div class="kpi-sm-value small">${bestMonth ? fmt(bestMonth.total,1) : 'N/A'}</div>
+      <div class="kpi-sm-value small">${bestMonth ? fmt(bestMonth.total,2) : 'N/A'}</div>
       <div class="kpi-sm-sub">${bestLabel} · period peak</div>
     </div>
-    <div class="kpi-sm ${invTurnover!==null&&parseFloat(invTurnover)>1.5?'neg':invTurnover!==null&&parseFloat(invTurnover)<0.5?'pos':'neu'}">
+    <div class="kpi-sm ${invTurnover!==null&&parseFloat(invTurnover)>1.5?'neg':invTurnover!==null&&parseFloat(invTurnover)<0.5?'pos':'neu'}" data-tt="Inventory Turnover ratio: how many times the average inventory has been sold during the period. Calculated as Total Sales divided by Average Inventory. Higher values indicate fast-moving inventory and efficient stock rotation.">
       <div class="kpi-sm-label">Inv. Turnover</div>
       <div class="kpi-sm-value">${invTurnover !== null ? invTurnover+'x' : 'N/A'}</div>
       <div class="kpi-sm-sub">sales / avg inventory</div>
     </div>
-    <div class="kpi-sm ${cv!==null&&cv>30?'neg':cv!==null&&cv<15?'pos':'neu'}">
+    <div class="kpi-sm ${cv!==null&&cv>30?'neg':cv!==null&&cv<15?'pos':'neu'}" data-tt="Coefficient of variation of monthly sales, expressed as a percentage. Calculated as standard deviation divided by mean. Lower values mean stable demand. Above 30 percent indicates erratic patterns requiring more buffer inventory.">
       <div class="kpi-sm-label">Sales Volatility</div>
-      <div class="kpi-sm-value">${cv !== null ? cv.toFixed(1)+'%' : 'N/A'}</div>
+      <div class="kpi-sm-value">${cv !== null ? cv.toFixed(2)+'%' : 'N/A'}</div>
       <div class="kpi-sm-sub">Coeff. of variation · ${cv===null?'N/A':cv<15?'Low':cv>30?'High':'Medium'}</div>
     </div>
   </div>`;
@@ -1491,10 +1738,10 @@ function destroyChart(key) {
 
 const CHART_DEFAULTS = {
   responsive: true, maintainAspectRatio: false,
-  plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+  plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y, 2)}` } } },
   scales: {
     x: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } },
-    y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } }
+    y: { grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 }, callback: v => fmt(v, 2) } }
   }
 };
 
@@ -1579,7 +1826,7 @@ function renderImportChart(id, cost) {
   });
 }
 
-function renderSalesLineChart(id, sales, product) {
+function renderSalesLineChart(id, sales, product, allSales) {
   const key = 'salesline-'+id;
   destroyChart(key);
   const ctx = document.getElementById('chart-sales-line-'+id).getContext('2d');
@@ -1597,7 +1844,8 @@ function renderSalesLineChart(id, sales, product) {
     // Show if next month >= current month (includes current month in progress)
     const isCurrentOrFuture = nY>today.getFullYear()||(nY===today.getFullYear()&&nM>=today.getMonth()+1);
     if (isCurrentOrFuture) {
-      const ef = ensembleForecast(sales, 1);
+      const forecastData = (allSales && allSales.length >= sales.length) ? allSales : sales;
+      const ef = ensembleForecast(forecastData, 1);
       if (ef && ef.ensemble.length) {
         projLabel = MONTH_NAMES[nM-1]+' '+nY;
         projPoint = ef.ensemble[0].point;
@@ -1659,7 +1907,7 @@ function renderSalesPieChart(id, sales) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } },
-                 tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmt(ctx.parsed,1)} MT (${((ctx.parsed/data.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)` } } }
+                 tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmt(ctx.parsed,2)} MT (${((ctx.parsed/data.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)` } } }
     }
   });
 }
@@ -1723,13 +1971,13 @@ function renderProductsChart(id, sales) {
       plugins: { legend: { position: 'right', labels: { filter: item => !item.text.includes('(proy.)'), font: { size: 9 }, boxWidth: 10 } } },
       scales: {
         x: { stacked: true, grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } },
-        y: { stacked: true, grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 } } }
+        y: { stacked: true, grid: { color: 'rgba(0,0,0,.04)' }, ticks: { font: { size: 10 }, callback: v => fmt(v, 2) } }
       }
     }
   });
 }
 
-function renderProjectionsChart(id, sales, product) {
+function renderProjectionsChart(id, sales, product, allSales) {
   const key = 'proj-'+id;
   destroyChart(key);
   const ctx = document.getElementById('chart-proj-'+id).getContext('2d');
@@ -1745,7 +1993,8 @@ function renderProjectionsChart(id, sales, product) {
   const rawN = lastM+1; const nextY=lastY+Math.floor((rawN-1)/12); const nextM=((rawN-1)%12)+1;
   const isCurrentOrFuture = nextY>today.getFullYear()||(nextY===today.getFullYear()&&nextM>=today.getMonth()+1);
 
-  const ef = ensembleForecast(sales, 1);
+  const forecastData = (allSales && allSales.length >= sales.length) ? allSales : sales;
+  const ef = ensembleForecast(forecastData, 1);
   const showProj = isCurrentOrFuture && ef && ef.ensemble.length > 0;
   const projLabel = showProj ? (MONTH_NAMES[nextM-1]+' '+nextY) : null;
 
@@ -1756,7 +2005,7 @@ function renderProjectionsChart(id, sales, product) {
     } else if (!ef.hasEnoughData) {
       subEl.textContent = `${ef.model} · ≥7 months recommended for better accuracy`;
     } else {
-      const mapeStr = ef.mape !== null ? ` · Precisión histórica: ${fmt((1-ef.mape)*100,1)}%` : '';
+      const mapeStr = ef.mape !== null ? ` · Precisión histórica: ${fmt((1-ef.mape)*100,2)}%` : '';
       subEl.textContent = `${ef.model}${mapeStr}`;
     }
   }
@@ -1801,11 +2050,14 @@ function renderProjectionsChart(id, sales, product) {
       responsive:true, maintainAspectRatio:false,
       plugins:{
         legend:{ position:'bottom', labels:{ font:{size:9}, boxWidth:10 } },
-        tooltip:{ mode:'index', intersect:false }
+        tooltip:{
+          mode:'index', intersect:false,
+          callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y, 2)}` }
+        }
       },
       scales:{
         x:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}} },
-        y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}} }
+        y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}, callback: v => fmt(v, 2)} }
       }
     }
   });
@@ -1897,14 +2149,14 @@ function renderDailySalesChart(id, dailySales, year, mFrom, mTo) {
           callbacks:{
             label: ctx => {
               if(ctx.dataset.label?.startsWith('_')) return null;
-              return ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y,1)} MT`;
+              return ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y,2)} MT`;
             }
           }
         }
       },
       scales:{
         x:{ grid:{display:false}, ticks:{font:{size:9}, maxRotation:60, autoSkip:true, maxTicksLimit:35} },
-        y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}} }
+        y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{font:{size:10}, callback: v => fmt(v, 2)} }
       }
     }
   });
@@ -1925,7 +2177,7 @@ function renderProjTable(id, inv, sales, allSales) {
   const ef = ensembleForecast(forecastData, 3);
   const rows = [];
 
-  // Historical rows with ensemble back-test
+  // Historical rows with linReg back-test
   const totals = sales.map(r=>r.total);
   const reg = linReg(totals);
   sales.forEach((r,i) => {
@@ -1950,7 +2202,7 @@ function renderProjTable(id, inv, sales, allSales) {
   }
 
   const modelInfo = ef ? `<div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--bg-alt);">
-    Model: <strong>${ef.model}</strong>${ef.mape!==null?' · Historical accuracy: <strong>'+fmt((1-ef.mape)*100,1)+'%</strong>':''}
+    Model: <strong>${ef.model}</strong>${ef.mape!==null?' · Historical accuracy: <strong>'+fmt((1-ef.mape)*100,2)+'%</strong>':''}
     ${!ef.hasEnoughData?'<span style="color:var(--yellow);"> · ≥7 months recommended for better accuracy</span>':''}
   </div>` : '';
 
@@ -1958,13 +2210,13 @@ function renderProjTable(id, inv, sales, allSales) {
     <tr><th>Month</th><th>Actual (MT)</th><th>Projection (MT)</th><th>Range (−/+)</th><th>Δ vs Projection</th><th>Remaining Inventory</th><th>Status</th></tr>`;
 
   rows.forEach(r => {
-    const actual = r.actual!==null ? fmt(r.actual,1) : '—';
-    const proj   = fmt(r.projected,1);
+    const actual = r.actual!==null ? fmt(r.actual,2) : '—';
+    const proj   = fmt(r.projected,2);
     const range  = (r.low!==null && r.high!==null) ? `<span style="font-size:10px;color:var(--muted);">${fmt(r.low,0)}–${fmt(r.high,0)}</span>` : '—';
-    const delta  = r.delta!==null ? (r.delta>=0?'+':'')+fmt(r.delta,1) : '—';
+    const delta  = r.delta!==null ? (r.delta>=0?'+':'')+fmt(r.delta,2) : '—';
     const dClass = r.delta!==null ? (r.delta>=0?'delta-pos':'delta-neg') : '';
     const covVal = r.coverLeft!==null ? r.coverLeft : (r.isProj&&lastInv!==null ? lastInv-r.projected : null);
-    const covTxt = covVal!==null ? fmt(covVal,1)+' MT' : '—';
+    const covTxt = covVal!==null ? fmt(covVal,2)+' MT' : '—';
     const alert  = covVal!==null && covVal<ALERT_THRESHOLD;
     const status = r.isProj ? (alert?'<span class="alert-tag">⚠ < 50 MT</span>':'<span class="ok-tag">OK</span>') : '<span class="ok-tag">Real</span>';
     const rowBg  = alert ? 'background:rgba(229,62,62,.04);' : '';
@@ -1996,255 +2248,4 @@ function renderAlertBanner(id, inv, sales) {
   const nextHigh = ef && ef.ensemble.length ? ef.ensemble[0].high  : null;
 
   if (lastInv !== null && nextProj !== null) {
-    const remaining = lastInv - nextProj;
-    const worstCase = nextHigh !== null ? lastInv - nextHigh : remaining;
-    if (remaining < ALERT_THRESHOLD) {
-      banner.className = 'show crit';
-      text.innerHTML = `⚠ ALERT ${id}: Inventory (${fmt(lastInv,1)} MT) − Next month projection (${fmt(nextProj,1)} MT) = <strong>${fmt(remaining,1)} MT</strong> — BELOW 50 MT MINIMUM`;
-    } else if (worstCase < ALERT_THRESHOLD) {
-      banner.className = 'show warn';
-      text.innerHTML = `⚡ ATTENTION ${id}: In a pessimistic scenario, coverage drops to <strong>${fmt(worstCase,1)} MT</strong> — near the minimum threshold (base projection: ${fmt(remaining,1)} MT)`;
-    } else if (remaining < ALERT_THRESHOLD * 2) {
-      banner.className = 'show warn';
-      text.innerHTML = `⚡ CAUTION ${id}: Coverage after projected sales: <strong>${fmt(remaining,1)} MT</strong> — approaching the minimum threshold`;
-    } else {
-      banner.className = 'show ok';
-      text.innerHTML = `✓ ${id}: Estimated coverage after projection: ${fmt(remaining,1)} MT — normal level`;
-    }
-  } else {
-    banner.className = '';
-  }
-}
 
-// ═══════════════════════════════════════════════════════════════════
-//  PDF REPORT GENERATOR
-//  Analista Financiero — Protocolo: Diagnóstico · Análisis · Hallazgos · Riesgo · Recomendación
-// ═══════════════════════════════════════════════════════════════════
-function generateRecommendations(id, lastInv, coverageDays, trendDir, trendPct, nextForecast, lastCif, avgCif, salesMonthly) {
-  const recs = [];
-  if (coverageDays !== null) {
-    if (coverageDays < 15)
-      recs.push({ priority:'CRITICAL', color:'#E53E3E', icon:'🔴', text:`Immediate replenishment required for ${id}. Only ${coverageDays} days of inventory remain at current sales pace. Initiate emergency procurement process without delay.` });
-    else if (coverageDays < 30)
-      recs.push({ priority:'HIGH', color:'#D69E2E', icon:'🟠', text:`Schedule replenishment for ${id} within the next ${Math.max(1,coverageDays-15)} days to maintain minimum safety stock of 50 MT. Risk of stockout is elevated.` });
-    else if (coverageDays < 60)
-      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'🟡', text:`Monitor inventory levels for ${id}. Projected coverage of ${coverageDays} days is adequate but approaching the recommended 60-day buffer. Plan next purchase order.` });
-    else
-      recs.push({ priority:'LOW', color:'#00B580', icon:'🟢', text:`Inventory coverage for ${id} is healthy at ${coverageDays} days. Maintain current replenishment schedule and optimize order timing to minimize holding costs.` });
-  }
-  if (trendDir === 'upward' && trendPct > 5)
-    recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'📈', text:`Sales volume is growing approximately ${trendPct.toFixed(1)}% per month. Increase future order volumes proportionally to meet projected demand growth and avoid stockout risk.` });
-  else if (trendDir === 'downward' && trendPct > 5)
-    recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'📉', text:`Sales volume is declining approximately ${trendPct.toFixed(1)}% per month. Investigate root causes — pricing competitiveness, market conditions, or customer churn — and develop a commercial recovery plan.` });
-  if (lastCif !== null && avgCif !== null && avgCif > 0) {
-    const costChg = (lastCif - avgCif) / avgCif * 100;
-    if (costChg > 5)
-      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'💲', text:`Latest CIF cost ($${fmt(lastCif,2)}/MT) is ${costChg.toFixed(1)}% above the period average ($${fmt(avgCif,2)}/MT). Review supplier contracts and explore alternative sourcing options to protect margins.` });
-    else if (costChg < -5)
-      recs.push({ priority:'LOW', color:'#00B580', icon:'💲', text:`Latest CIF cost ($${fmt(lastCif,2)}/MT) is ${Math.abs(costChg).toFixed(1)}% below period average. Favorable market — consider opportunistic forward purchasing to lock in lower costs.` });
-  }
-  if (nextForecast !== null && salesMonthly.length > 0) {
-    const lastM = salesMonthly[salesMonthly.length-1].total;
-    const deltaPct = lastM > 0 ? (nextForecast - lastM) / lastM * 100 : 0;
-    if (Math.abs(deltaPct) > 10)
-      recs.push({ priority:'MEDIUM', color:'#3182CE', icon:'🎯', text:`Ensemble forecast projects a ${Math.abs(deltaPct).toFixed(1)}% ${deltaPct>0?'increase':'decrease'} in next month sales (${fmt(nextForecast,1)} MT vs ${fmt(lastM,1)} MT last month). Adjust procurement and logistics capacity accordingly.` });
-  }
-  if (recs.length === 0)
-    recs.push({ priority:'LOW', color:'#00B580', icon:'✅', text:'All key operational metrics are within normal parameters. Continue monitoring the dashboard and maintain current replenishment and sales strategies.' });
-  return recs;
-}
-
-function generateReport() {
-  const id = STATE.activeIsland;
-  const raw = STATE.rawData?.islands?.[id];
-  if (!raw || raw.error) { alert('No data available for current island.'); return; }
-
-  const { year, monthFrom, monthTo } = STATE.filters;
-  const normalized = normalizeIslandData(raw, year, id);
-  const inv    = filterInventory(normalized.inventory, year, monthFrom, monthTo);
-  const cost   = filterCost(normalized.aveCost, year, monthFrom, monthTo);
-  const sales  = aggregateSalesMonthly(normalized.sales, year, monthFrom, monthTo);
-
-  const lastInv    = inv.length   ? inv[inv.length-1].value        : null;
-  const totalSales = sales.reduce((s,r)=>s+r.total,0);
-  const totalDays  = sales.reduce((s,r)=>s+r.days,0);
-  const avgDaily   = totalDays>0 ? totalSales/totalDays : 0;
-  const covDays    = avgDaily>0&&lastInv ? Math.round(lastInv/avgDaily) : null;
-  const lastCif    = cost.length ? cost[cost.length-1].cifCost     : null;
-  const avgCif     = cost.length ? cost.reduce((s,r)=>s+r.cifCost,0)/cost.length : null;
-
-  const ef         = ensembleForecast(sales,1);
-  const nextForecast = ef?.ensemble?.[0]?.point ?? null;
-  const mapeStr    = ef?.mape!=null ? fmt((1-ef.mape)*100,1)+'%' : 'N/A';
-
-  const reg        = linReg(sales.map(r=>r.total));
-  const trendDir   = reg.slope>0.01?'upward':reg.slope<-0.01?'downward':'flat';
-  const trendLabel = reg.slope>0.01?'Upward ↑':reg.slope<-0.01?'Downward ↓':'Stable →';
-  const trendPct   = sales.length>1&&sales[0].total>0 ? Math.abs(reg.slope/sales[0].total*100) : 0;
-  const invReg     = linReg(inv.map(r=>r.value));
-  const invLabel   = invReg.slope>0.01?'Increasing ↑':invReg.slope<-0.01?'Decreasing ↓':'Stable →';
-  const riskLabel  = covDays===null?'N/A':covDays<15?'🔴 CRITICAL':covDays<30?'🟠 HIGH':covDays<60?'🟡 MEDIUM':'🟢 LOW';
-  const INAMES     = {SXM:'Saint Maarten',USVI:'Saint Thomas (USVI)',ANU:'Antigua & Barbuda',DOM:'Dominica'};
-  const period     = monthFrom===monthTo ? MONTH_NAMES[monthFrom-1]+' '+year
-                     : MONTH_NAMES[monthFrom-1]+' – '+MONTH_NAMES[monthTo-1]+' '+year;
-  const recs       = generateRecommendations(id,lastInv,covDays,trendDir,trendPct,nextForecast,lastCif,avgCif,sales);
-  const now        = new Date().toLocaleString('en');
-
-  const th  = `style="padding:7px 12px;text-align:left;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;"`;
-  const thr = `style="padding:7px 12px;text-align:right;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;"`;
-  const hdr = `style="background:#101B46;color:#fff;"`;
-  const alt = `style="background:#F5F6F7;"`;
-  const td  = (v,extra='')=>`<td style="padding:7px 12px;${extra}">${v}</td>`;
-  const tdb = (v,extra='')=>`<td style="padding:7px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;${extra}">${v}</td>`;
-
-  const sectionHead = (n,title,color)=>
-    `<div class="report-section"><div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;letter-spacing:1px;color:#101B46;border-left:4px solid ${color};padding-left:10px;margin-bottom:12px;">${n}. ${title}</div>`;
-
-  // Chart image capture
-  const chartImg = (canvasId, label) => {
-    const el = document.getElementById(canvasId);
-    if (!el) return '';
-    try {
-      const src = el.toDataURL('image/png');
-      return `<div style="margin-bottom:18px;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#4A5568;font-weight:600;margin-bottom:6px;">${label}</div>
-        <img src="${src}" style="width:100%;border-radius:6px;border:1px solid #E2E8F0;">
-      </div>`;
-    } catch(e) { return ''; }
-  };
-
-  const html = `
-<div style="font-family:'Barlow',sans-serif;max-width:860px;margin:0 auto;padding:40px 48px;color:#101B46;">
-  <div style="border-bottom:4px solid #101B46;padding-bottom:16px;margin-bottom:28px;">
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:32px;letter-spacing:4px;">ARGOS</div>
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:11px;letter-spacing:4px;color:#00B580;margin-top:2px;">OPERATIONS INTELLIGENCE</div>
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;margin-top:12px;">OPERATIONS FINANCIAL REPORT — ${id} · ${INAMES[id]||id}</div>
-    <div style="font-size:12px;color:#4A5568;margin-top:4px;">Period: ${period} &nbsp;·&nbsp; Generated: ${now}</div>
-  </div>
-
-  ${sectionHead(1,'EXECUTIVE SUMMARY','#C2D500')}
-  <table style="width:100%;border-collapse:collapse;font-size:12px;">
-    <tr ${hdr}><th ${th}>KPI</th><th ${thr}>Value</th><th ${th}>Assessment</th></tr>
-    <tr ${alt}>${td('<strong>Current Inventory</strong>')}${tdb(lastInv!==null?fmt(lastInv,1)+' MT':'N/A')}${td(invLabel,'color:#4A5568;')}</tr>
-    <tr>${td('<strong>Total Sales (period)</strong>')}${tdb(fmt(totalSales,1)+' MT')}${td(sales.length+' month(s) accumulated','color:#4A5568;')}</tr>
-    <tr ${alt}>${td('<strong>Average Daily Sales</strong>')}${tdb(fmt(avgDaily,2)+' MT/day')}${td('Trend: '+trendLabel,'color:#4A5568;')}</tr>
-    <tr>${td('<strong>Estimated Coverage</strong>')}${tdb(covDays!==null?covDays+' days':'N/A',covDays!==null&&covDays<30?'color:#E53E3E;':'')}${td(riskLabel)}</tr>
-    <tr ${alt}>${td('<strong>Next Month Forecast</strong>')}${tdb(nextForecast!==null?fmt(nextForecast,1)+' MT':'N/A')}${td('Model accuracy: '+mapeStr,'color:#4A5568;')}</tr>
-    <tr>${td('<strong>Latest CIF Cost</strong>')}${tdb(lastCif!==null?'$'+fmt(lastCif,2)+'/MT':'N/A')}${td(avgCif!==null?'Period avg: $'+fmt(avgCif,2)+'/MT':'','color:#4A5568;')}</tr>
-  </table></div>
-
-  ${inv.length>0?sectionHead(2,'INVENTORY ANALYSIS','#00B580')+`
-  <table style="width:100%;border-collapse:collapse;font-size:12px;">
-    <tr ${hdr}><th ${th}>Month</th><th ${thr}>Inventory (MT)</th><th ${thr}>MoM Change</th><th ${thr}>Coverage Days</th></tr>
-    ${inv.map((r,i)=>{
-      const prev=i>0?inv[i-1].value:null;
-      const chg=prev!==null?r.value-prev:null;
-      const pct=prev&&prev>0?chg/prev*100:null;
-      const cov=avgDaily>0?Math.round(r.value/avgDaily):null;
-      const bg=i%2===0?'background:#F5F6F7;':'';
-      const mLabel=MONTH_NAMES[parseInt(r.month.split('-')[1])-1]+' '+r.month.split('-')[0];
-      return`<tr style="${bg}">${td('<strong>'+mLabel+'</strong>')}${tdb(fmt(r.value,1))}
-        ${td(chg!==null?(chg>=0?'+':'')+fmt(chg,1)+(pct!==null?' ('+( chg>=0?'+':'')+pct.toFixed(1)+'%)':''):'—',chg!==null?(chg>=0?'color:#00B580;':'color:#E53E3E;')+'text-align:right;':'text-align:right;')}
-        ${td(cov!==null?cov+'d':'—','text-align:right;'+(cov!==null&&cov<30?'color:#E53E3E;font-weight:700;':''))}
-      </tr>`;
-    }).join('')}
-  </table></div>`:''}
-
-  ${sales.length>0?sectionHead(3,'SALES PERFORMANCE','#3182CE')+`
-  <table style="width:100%;border-collapse:collapse;font-size:12px;">
-    <tr ${hdr}><th ${th}>Month</th><th ${thr}>Total (MT)</th><th ${thr}>MoM Δ</th><th ${thr}>Local Bulk</th><th ${thr}>Export Bulk</th><th ${thr}>Local 21kg</th></tr>
-    ${sales.map((r,i)=>{
-      const prev=i>0?sales[i-1].total:null;
-      const chg=prev!==null?r.total-prev:null;
-      const pct=prev&&prev>0?chg/prev*100:null;
-      const bg=i%2===0?'background:#F5F6F7;':'';
-      const mLabel=MONTH_NAMES[parseInt(r.month.split('-')[1])-1]+' '+r.month.split('-')[0];
-      return`<tr style="${bg}">${td('<strong>'+mLabel+'</strong>')}${tdb(fmt(r.total,1))}
-        ${td(chg!==null?(chg>=0?'+':'')+fmt(chg,1)+(pct!==null?' ('+pct.toFixed(1)+'%)':''):'—',chg!==null?(chg>=0?'color:#00B580;':'color:#E53E3E;')+'text-align:right;':'text-align:right;')}
-        ${td(fmt(r.localBulk,1),'text-align:right;')}${td(fmt(r.exportBulk,1),'text-align:right;')}${td(fmt(r.local21kg,1),'text-align:right;')}
-      </tr>`;
-    }).join('')}
-    <tr style="background:#101B46;color:#fff;">
-      <td style="padding:7px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:700;">TOTAL</td>
-      <td style="padding:7px 12px;text-align:right;font-family:'Barlow Condensed',sans-serif;font-weight:800;">${fmt(totalSales,1)} MT</td>
-      <td colspan="4" style="padding:7px 12px;text-align:right;font-size:11px;">Trend: ${trendLabel} · Avg: ${fmt(avgDaily,2)} MT/day</td>
-    </tr>
-  </table></div>`:''}
-
-  ${sectionHead(4,'FORECAST &amp; PROJECTIONS','#D69E2E')}
-  <table style="width:100%;border-collapse:collapse;font-size:12px;">
-    <tr ${hdr}><th ${th}>Metric</th><th ${thr}>Value</th></tr>
-    <tr ${alt}>${td('<strong>Next Month Sales Forecast</strong>')}${tdb(nextForecast!==null?fmt(nextForecast,1)+' MT':'N/A','text-align:right;')}</tr>
-    <tr>${td('<strong>Forecast Model Used</strong>')}${td(ef?.model??'N/A','text-align:right;color:#4A5568;')}</tr>
-    <tr ${alt}>${td('<strong>Model Accuracy (MAPE)</strong>')}${td(mapeStr,'text-align:right;color:#4A5568;')}</tr>
-    <tr>${td('<strong>Inventory Post-Projection</strong>')}${tdb(lastInv!==null&&nextForecast!==null?fmt(lastInv-nextForecast,1)+' MT':'N/A','text-align:right;'+(lastInv!==null&&nextForecast!==null&&(lastInv-nextForecast)<50?'color:#E53E3E;':''))}</tr>
-  </table></div>
-
-  ${sectionHead(5,'RISK ASSESSMENT','#E53E3E')}
-  <div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;line-height:1.9;margin-bottom:4px;">
-    <div><strong>Coverage Risk:</strong> ${riskLabel} — ${covDays!==null?covDays+' days remaining at current average daily sales pace':'Cannot calculate — inventory or sales data unavailable'}</div>
-    <div><strong>Sales Trend:</strong> ${trendLabel}${trendPct>5?' ('+trendPct.toFixed(1)+'% avg monthly change)':''}</div>
-    <div><strong>Inventory Trend:</strong> ${invLabel}</div>
-    ${lastInv!==null&&nextForecast!==null&&(lastInv-nextForecast)<50?'<div style="color:#E53E3E;font-weight:700;margin-top:6px;">⚠ CRITICAL: Post-projection inventory falls below the 50 MT minimum safety threshold. Immediate action required.</div>':''}
-  </div></div>
-
-  ${sectionHead(6,'STRATEGIC RECOMMENDATIONS','#6B46C1')}
-  ${recs.map(r=>`
-    <div style="display:flex;gap:12px;padding:10px 14px;margin-bottom:8px;background:#F5F6F7;border-radius:6px;border-left:3px solid ${r.color};">
-      <div style="font-size:16px;flex-shrink:0;">${r.icon}</div>
-      <div>
-        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:.5px;color:#4A5568;margin-bottom:3px;">${r.priority} PRIORITY</div>
-        <div style="font-size:12px;line-height:1.6;">${r.text}</div>
-      </div>
-    </div>`).join('')}
-  </div>
-
-  ${sectionHead(7,'CHARTS SNAPSHOT','#101B46')}
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
-    <div>
-      ${chartImg('chart-inv-'+id, 'Monthly Inventory (MT)')}
-      ${chartImg('chart-sales-line-'+id, 'Total Sales Trend')}
-      ${chartImg('chart-daily-'+id, 'Daily Sales Movement')}
-    </div>
-    <div>
-      ${chartImg('chart-cif-'+id, 'CIF Import Cost (USD/MT)')}
-      ${chartImg('chart-products-'+id, 'Sales by Product')}
-      ${chartImg('chart-proj-'+id, 'Sales Projections & Forecast')}
-    </div>
-  </div>
-  </div>
-
-  <div style="border-top:2px solid #E2E8F0;padding-top:12px;margin-top:12px;font-size:10px;color:#718096;display:flex;justify-content:space-between;">
-    <div>ARGOS Operations Intelligence — ${id} · ${INAMES[id]||id} — VP RCCA Caribbean Terminals</div>
-    <div>Generated ${now} · Confidential</div>
-  </div>
-</div>`;
-
-  const overlay = document.getElementById('print-overlay');
-  overlay.innerHTML = html;
-  overlay.style.display = 'block';
-  setTimeout(() => window.print(), 80);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  UI HELPERS
-// ═══════════════════════════════════════════════════════════════════
-function showLoading(msg) {
-  document.getElementById('loading-text').textContent = msg || 'Loading…';
-  document.getElementById('loading').classList.add('show');
-}
-function hideLoading() { document.getElementById('loading').classList.remove('show'); }
-
-function showError(msg) {
-  const banner = document.getElementById('alert-banner');
-  document.getElementById('alert-text').innerHTML = '⚠ ' + msg;
-  banner.className = 'show crit';
-}
-
-function fmt(v, decimals = 0) {
-  if (v === null || v === undefined || isNaN(v)) return 'N/A';
-  return Number(v).toLocaleString('es', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-}
-</script>
-</body>
-</html>
