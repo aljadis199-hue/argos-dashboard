@@ -19,6 +19,12 @@ const ARGOS_CONFIG = {
   // Fleet tab — flow HTTP trigger (Azure SQL → NextShipHistory → JSON response)
   FLEET_FLOW_URL: 'https://defaultfaa44fd9dabe4064a6bb59608ea9d0.f3.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/a9aa0977801645a18e7e35d435a46e1e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=AxBy0p9UfAem-7R2PpMxGxJaFNANzu7wOt3OEtsukAU',
 
+  // Customer Warnings tab — flow HTTP trigger
+  // El flow debe leer los 4 caches JSON de SharePoint en:
+  //   /Administration/Financial Daily Operations/_cache/CustomerWarnings{ANU|DOM|STT|SXM}.json
+  // y devolver un único objeto consolidado (ver guía en GUIA_CustomerWarnings_PowerAutomate.html)
+  WARNINGS_FLOW_URL: 'https://defaultfaa44fd9dabe4064a6bb59608ea9d0.f3.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/eddb8543760b4cbcaffd91e3d95b32cf/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=9YXEdoK2q5k5xEDz8NeQ02mSqkZS47AA7PavRrWjpxg',
+
   // ── PARÁMETROS OPERACIONALES (no tocar) ──────────────────────────────────
   REFRESH_MINUTES: 30,
   CRITICAL_DAYS:   7,
