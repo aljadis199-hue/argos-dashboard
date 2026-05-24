@@ -322,6 +322,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <button class="itab" id="tab-ANU" onclick="switchIsland('ANU')">ANU</button>
       <button class="itab" id="tab-DOM" onclick="switchIsland('DOM')">DOM</button>
       <button class="itab" id="tab-barcos" onclick="switchBarcos()" style="border-left:3px solid #3182CE;margin-left:8px;">&#9972; Next Ship</button>
+      <button class="itab" id="tab-warnings" onclick="switchWarnings()" style="border-left:3px solid #E53E3E;margin-left:8px;">&#9888; Customer Warnings</button>
     </div>
 
     <!-- SXM SECTION -->
@@ -659,6 +660,20 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <!-- Voyages table — populated by loadFleetData() -->
       <div id="fleet-table-card" class="chart-card"></div>
     </div><!-- /section-barcos -->
+
+    <!-- ══════════════ CUSTOMER WARNINGS SECTION ══════════════ -->
+    <div id="section-warnings" class="island-section">
+      <!-- KPI row -->
+      <div id="warn-kpis" class="kpi-metrics-grid" style="margin-bottom:14px;grid-template-columns:repeat(5,1fr);">
+        <div class="kpi" style="grid-column:1/-1;color:var(--muted);text-align:center;padding:24px;">
+          Cargando alertas de clientes...
+        </div>
+      </div>
+      <!-- Island summary cards -->
+      <div id="warn-islands" class="chart-grid-2" style="grid-template-columns:repeat(4,1fr);"></div>
+      <!-- Filters + table -->
+      <div id="warn-table-card" class="chart-card"></div>
+    </div><!-- /section-warnings -->
 
   </main>
 </div>
@@ -1050,12 +1065,16 @@ function applyFilters() {
   STATE.filters.product   = document.getElementById('f-product').value;
   const island = document.getElementById('f-island').value;
   const fleetActive = document.getElementById('section-barcos').classList.contains('active');
-  if (!fleetActive) {
+  const warnActive  = document.getElementById('section-warnings').classList.contains('active');
+  if (!fleetActive && !warnActive) {
     if (island !== STATE.activeIsland) switchIsland(island);
     if (STATE.rawData) renderIsland(STATE.activeIsland);
   }
   if (STATE.fleetData && fleetActive) {
     renderFleetData(STATE.fleetData);
+  }
+  if (STATE.warningsData && warnActive) {
+    renderCustomerWarnings(STATE.warningsData);
   }
 }
 
@@ -1088,6 +1107,14 @@ function switchBarcos() {
   document.getElementById('section-barcos').classList.add('active');
   document.getElementById('tab-barcos').classList.add('active');
   loadFleetData();
+}
+
+function switchWarnings() {
+  document.querySelectorAll('.island-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.itab').forEach(t => t.classList.remove('active'));
+  document.getElementById('section-warnings').classList.add('active');
+  document.getElementById('tab-warnings').classList.add('active');
+  loadCustomerWarnings();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1268,6 +1295,302 @@ function renderFleetError(msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  CUSTOMER WARNINGS — Power Automate HTTP trigger → SharePoint cache JSONs
+// ═══════════════════════════════════════════════════════════════════
+const WARN_ISLAND_KEYS = ['SXM', 'DOM', 'ANU', 'STT'];
+const WARN_FILTERS = { level: 'all', search: '', island: 'ALL' };
+
+function loadCustomerWarnings() {
+  const url = ARGOS_CONFIG.WARNINGS_FLOW_URL;
+  if (!url || url.includes('REEMPLAZAR')) {
+    const cached = warnLoadCache();
+    if (cached) { STATE.warningsData = cached; renderCustomerWarnings(cached); return; }
+    renderWarningsError('Configura WARNINGS_FLOW_URL en config.js (o no hay caché previo)');
+    return;
+  }
+  fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ action: 'getCustomerWarnings' })
+  })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(data => {
+      const norm = warnNormalize(data);
+      STATE.warningsData = norm;
+      warnSaveCache(norm);
+      renderCustomerWarnings(norm);
+    })
+    .catch(e => {
+      const cached = warnLoadCache();
+      if (cached) { STATE.warningsData = cached; renderCustomerWarnings(cached, 'Usando caché local. Error: ' + e); return; }
+      renderWarningsError(String(e));
+    });
+}
+
+// Acepta múltiples formatos del flow y normaliza a:
+//   { updated, islands: { SXM:{updated,warnings:[]}, DOM:..., ANU:..., STT:... } }
+function warnNormalize(data) {
+  if (!data) return { updated: null, islands: {} };
+  if (data.islands && typeof data.islands === 'object') return data;
+  const out = { updated: data.updated || new Date().toISOString(), islands: {} };
+  WARN_ISLAND_KEYS.forEach(k => {
+    const block = data[k] || data['CustomerWarnings' + k] || null;
+    if (block) {
+      if (Array.isArray(block)) out.islands[k] = { updated: out.updated, warnings: block };
+      else out.islands[k] = { updated: block.updated || out.updated, warnings: block.warnings || [] };
+    } else {
+      out.islands[k] = { updated: null, warnings: [] };
+    }
+  });
+  return out;
+}
+
+function warnSaveCache(data) {
+  try { localStorage.setItem('argos.customerWarnings', JSON.stringify(data)); } catch(e) {}
+}
+function warnLoadCache() {
+  try { const s = localStorage.getItem('argos.customerWarnings'); return s ? JSON.parse(s) : null; }
+  catch(e) { return null; }
+}
+
+function warnChurnLevel(p) {
+  const n = parseFloat(p) || 0;
+  if (n >= 0.80) return 'critical';
+  if (n >= 0.50) return 'high';
+  if (n >= 0.20) return 'medium';
+  return 'low';
+}
+
+function warnChurnBadge(p) {
+  const n = parseFloat(p) || 0;
+  const pct = (n * 100).toFixed(0) + '%';
+  if (n >= 0.80) return `<span class="alert-tag">${pct}</span>`;
+  if (n >= 0.50) return `<span class="alert-tag" style="background:rgba(214,158,46,.12);color:var(--yellow);">${pct}</span>`;
+  if (n >= 0.20) return `<span class="ok-tag" style="background:rgba(49,130,206,.12);color:var(--blue);">${pct}</span>`;
+  return `<span class="ok-tag">${pct}</span>`;
+}
+
+function warnDaysSince(iso) {
+  if (!iso) return null;
+  const d = new Date(iso); if (isNaN(d)) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+
+function warnFmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso); if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function warnGlobalIsland() {
+  const sel = document.getElementById('f-island').value;
+  return sel === 'USVI' ? 'STT' : sel;
+}
+
+function warnAllRows(data) {
+  const rows = [];
+  WARN_ISLAND_KEYS.forEach(k => {
+    const block = data.islands[k]; if (!block) return;
+    (block.warnings || []).forEach(w => {
+      rows.push({
+        island: k,
+        product: (w.product || '').trim(),
+        material_id: (w.material_id || '').trim(),
+        customer: (w.customer || '').trim(),
+        lastVolumen: parseFloat(w.lastVolumen) || 0,
+        lastPurchase: w.lastPurchase || null,
+        churnProb: parseFloat(w.churnProb) || 0,
+        level: warnChurnLevel(w.churnProb)
+      });
+    });
+  });
+  return rows;
+}
+
+function renderCustomerWarnings(data, notice) {
+  const allRows = warnAllRows(data);
+  const updated = data.updated ? new Date(data.updated).toLocaleString('es-ES') : '—';
+
+  const critical = allRows.filter(r => r.level === 'critical');
+  const high     = allRows.filter(r => r.level === 'high');
+  const totalVolAtRisk = allRows
+    .filter(r => r.churnProb >= 0.5)
+    .reduce((s, r) => s + r.lastVolumen, 0);
+  const uniqueCustomers = new Set(allRows.filter(r => r.churnProb >= 0.5).map(r => r.customer)).size;
+
+  document.getElementById('warn-kpis').innerHTML = `
+    <div class="kpi">
+      <div class="kpi-label">Total Warnings</div>
+      <div class="kpi-value" style="font-size:28px;">${allRows.length}</div>
+      <div class="kpi-sub">SXM · DOM · ANU · STT</div>
+    </div>
+    <div class="kpi crit">
+      <div class="kpi-label">Critical (&ge; 80%)</div>
+      <div class="kpi-value" style="color:var(--red);">${critical.length}</div>
+      <div class="kpi-sub">Cliente probablemente perdido</div>
+    </div>
+    <div class="kpi warn">
+      <div class="kpi-label">High (50–79%)</div>
+      <div class="kpi-value" style="color:var(--yellow);">${high.length}</div>
+      <div class="kpi-sub">Requiere contacto inmediato</div>
+    </div>
+    <div class="kpi info">
+      <div class="kpi-label">Unique Customers @Risk</div>
+      <div class="kpi-value" style="font-size:28px;">${uniqueCustomers}</div>
+      <div class="kpi-sub">Churn &ge; 50%</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Vol. Last Purchase @Risk</div>
+      <div class="kpi-value" style="font-size:24px;">${totalVolAtRisk.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+      <div class="kpi-sub">Suma últimas compras (MT/un)</div>
+    </div>`;
+
+  // Island cards
+  document.getElementById('warn-islands').innerHTML = WARN_ISLAND_KEYS.map(k => {
+    const block = data.islands[k] || { warnings: [], updated: null };
+    const rows = (block.warnings || []).map(w => ({
+      customer: (w.customer || '').trim(),
+      churnProb: parseFloat(w.churnProb) || 0,
+      lastVolumen: parseFloat(w.lastVolumen) || 0
+    }));
+    const crit = rows.filter(r => r.churnProb >= 0.8).length;
+    const top  = [...rows].sort((a,b) => b.churnProb - a.churnProb).slice(0, 3);
+    const islandName = (ARGOS_CONFIG.ISLANDS[k === 'STT' ? 'USVI' : k] || {}).name || k;
+    const upd = block.updated ? new Date(block.updated).toLocaleString('es-ES') : '—';
+    return `
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">${k} — ${islandName}</div>
+            <div class="chart-sub">${rows.length} warnings · ${upd}</div>
+          </div>
+          <span class="chart-badge ${crit>0?'alert':''}" style="${crit>0?'':'background:rgba(0,181,128,.1);color:var(--teal);'}">${crit} crítico${crit===1?'':'s'}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--display);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Top Risk</div>
+        ${top.length ? top.map(r => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+            <span style="color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;" title="${r.customer}">${r.customer || '—'}</span>
+            ${warnChurnBadge(r.churnProb)}
+          </div>`).join('') : '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Sin warnings</div>'}
+      </div>`;
+  }).join('');
+
+  renderWarningsTable(allRows, updated, notice);
+}
+
+function renderWarningsTable(allRows, updated, notice) {
+  // Pre-filter por isla global (sigue al filtro principal del dashboard)
+  const islandSel = warnGlobalIsland();
+  let rows = allRows.filter(r => r.island === islandSel);
+  if (rows.length === 0) rows = allRows; // si no hay datos para la isla seleccionada, mostrar todo
+
+  // Filtros locales
+  if (WARN_FILTERS.level !== 'all') rows = rows.filter(r => r.level === WARN_FILTERS.level);
+  if (WARN_FILTERS.search) {
+    const q = WARN_FILTERS.search.toLowerCase();
+    rows = rows.filter(r =>
+      r.customer.toLowerCase().includes(q) ||
+      r.product.toLowerCase().includes(q) ||
+      r.material_id.toLowerCase().includes(q)
+    );
+  }
+  rows.sort((a, b) => b.churnProb - a.churnProb);
+
+  const noticeBar = notice
+    ? `<div style="background:#FFFBEB;border-left:3px solid var(--yellow);padding:8px 12px;font-size:11px;color:var(--navy);margin-bottom:12px;border-radius:4px;">&#9888; ${notice}</div>`
+    : '';
+
+  document.getElementById('warn-table-card').innerHTML = `
+    ${noticeBar}
+    <div class="chart-header">
+      <div>
+        <div class="chart-title">Customer Warnings — ${islandSel}</div>
+        <div class="chart-sub">SharePoint cache · Power Automate · ${rows.length} registros · ${updated}</div>
+      </div>
+      <span class="chart-badge alert">&#9888; Churn Risk</span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:var(--radius);">
+      <label style="font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;">Nivel</label>
+      <select class="filter-select" id="warn-f-level" onchange="warnApplyFilter()">
+        <option value="all"${WARN_FILTERS.level==='all'?' selected':''}>Todos</option>
+        <option value="critical"${WARN_FILTERS.level==='critical'?' selected':''}>Critical (&ge;80%)</option>
+        <option value="high"${WARN_FILTERS.level==='high'?' selected':''}>High (50–79%)</option>
+        <option value="medium"${WARN_FILTERS.level==='medium'?' selected':''}>Medium (20–49%)</option>
+        <option value="low"${WARN_FILTERS.level==='low'?' selected':''}>Low (&lt;20%)</option>
+      </select>
+      <label style="font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;">Buscar</label>
+      <input class="filter-input" id="warn-f-search" type="text" placeholder="Cliente, producto, material..." value="${WARN_FILTERS.search.replace(/"/g,'&quot;')}" oninput="warnApplyFilter()" style="min-width:220px;">
+      <button class="btn-apply" onclick="warnExportCSV()" style="margin-left:auto;background:var(--teal);">&#8681; Export CSV</button>
+      <button class="btn-apply" onclick="loadCustomerWarnings()">Refresh</button>
+    </div>
+    <table class="proj-table">
+      <thead><tr>
+        <th>Island</th><th>Customer</th><th>Product</th><th>Material ID</th>
+        <th>Last Volume</th><th>Last Purchase</th><th>Days Since</th><th>Churn Prob.</th>
+      </tr></thead>
+      <tbody>${rows.length ? rows.map(r => {
+        const ds = warnDaysSince(r.lastPurchase);
+        return `
+        <tr>
+          <td><strong>${r.island}</strong></td>
+          <td>${r.customer || '—'}</td>
+          <td>${r.product || '—'}</td>
+          <td style="font-family:monospace;font-size:11px;color:var(--muted);">${r.material_id || '—'}</td>
+          <td class="val">${r.lastVolumen.toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+          <td>${warnFmtDate(r.lastPurchase)}</td>
+          <td class="val" style="color:${ds && ds>60 ? 'var(--red)' : ds && ds>30 ? 'var(--yellow)' : 'var(--muted)'};">${ds!=null?ds+' d':'—'}</td>
+          <td>${warnChurnBadge(r.churnProb)}</td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px;">Sin registros con los filtros actuales</td></tr>`}
+      </tbody>
+    </table>`;
+}
+
+function warnApplyFilter() {
+  const lvl = document.getElementById('warn-f-level');
+  const srch = document.getElementById('warn-f-search');
+  if (lvl)  WARN_FILTERS.level  = lvl.value;
+  if (srch) WARN_FILTERS.search = srch.value;
+  if (STATE.warningsData) {
+    const allRows = warnAllRows(STATE.warningsData);
+    const updated = STATE.warningsData.updated ? new Date(STATE.warningsData.updated).toLocaleString('es-ES') : '—';
+    renderWarningsTable(allRows, updated, null);
+    // Devolver foco al input de búsqueda
+    if (srch) { const el = document.getElementById('warn-f-search'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+  }
+}
+
+function warnExportCSV() {
+  if (!STATE.warningsData) return;
+  const rows = warnAllRows(STATE.warningsData);
+  const header = ['Island','Customer','Product','MaterialID','LastVolume','LastPurchase','DaysSince','ChurnProb','Level'];
+  const csv = [header.join(',')].concat(rows.map(r => [
+    r.island,
+    '"' + (r.customer || '').replace(/"/g,'""') + '"',
+    '"' + (r.product  || '').replace(/"/g,'""') + '"',
+    '"' + (r.material_id || '').replace(/"/g,'""') + '"',
+    r.lastVolumen,
+    r.lastPurchase || '',
+    warnDaysSince(r.lastPurchase) ?? '',
+    r.churnProb,
+    r.level
+  ].join(','))).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'customer_warnings_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+function renderWarningsError(msg) {
+  const txt = msg || 'Error al conectar con el flow de Customer Warnings';
+  document.getElementById('warn-kpis').innerHTML =
+    `<div class="kpi" style="grid-column:1/-1;color:var(--muted);text-align:center;padding:24px;">&#9888; ${txt}</div>`;
+  document.getElementById('warn-islands').innerHTML = '';
+  document.getElementById('warn-table-card').innerHTML = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  RENDER ISLAND
 // ═══════════════════════════════════════════════════════════════════
 function renderIsland(id) {
@@ -1344,7 +1667,7 @@ function renderIsland(id) {
   renderProjectionsChart(id, salesMonthly, product, allSalesMonthly);
   renderDailySalesChart(id, normalized.sales, year, monthFrom, monthTo);
   renderProjTable(id, inv, salesMonthly, allSalesMonthly);
-  renderAlertBanner(id, inv, allSalesMonthly);
+  renderAlertBanner(id, inv, allSalesMonthly, normalized.sales);
 }
 
 function renderPending(id) {
@@ -2237,32 +2560,55 @@ function renderProjTable(id, inv, sales, allSales) {
 // ═══════════════════════════════════════════════════════════════════
 //  ALERT BANNER
 // ═══════════════════════════════════════════════════════════════════
-function renderAlertBanner(id, inv, sales) {
+function renderAlertBanner(id, inv, sales, dailySales) {
   const banner = document.getElementById('alert-banner');
   const text   = document.getElementById('alert-text');
   const lastInv = inv.length ? inv[inv.length-1].value : null;
 
-  // Use ensemble forecast for alert projection
-  const ef = ensembleForecast(sales, 1);
-  const nextProj = ef && ef.ensemble.length ? ef.ensemble[0].point : null;
-  const nextHigh = ef && ef.ensemble.length ? ef.ensemble[0].high  : null;
+  // Same forecast pipeline used by the Daily Sales Movement chart
+  // (forecast-engine.js → dailyForecast → Holt Linear + DOW seasonality)
+  const allSorted = (dailySales || []).filter(r => r.date && r.total >= 0)
+                                       .sort((a,b) => a.date.localeCompare(b.date));
+  const fc7 = allSorted.length >= 14
+    ? dailyForecast(allSorted.filter(r => r.total > 0), 7)
+    : [];
 
-  if (lastInv !== null && nextProj !== null) {
-    const remaining = lastInv - nextProj;
-    const worstCase = nextHigh !== null ? lastInv - nextHigh : remaining;
-    if (remaining < ALERT_THRESHOLD) {
+  // Historical fallback (only used if there is not enough daily data for the forecast)
+  const totalSales = sales.reduce((s,r)=>s+r.total,0);
+  const totalDays  = sales.reduce((s,r)=>s+r.days,0);
+  const avgDaily   = totalDays > 0 ? totalSales/totalDays : 0;
+
+  // Bulk inventory vs sum of the next-7-day forecast from the Daily Sales chart
+  const usingForecast = fc7.length === 7;
+  const projected7d   = usingForecast ? fc7.reduce((s,r)=>s+r.value,0) : avgDaily * 7;
+  const worst7d       = usingForecast ? fc7.reduce((s,r)=>s+r.high ,0) : projected7d;
+  const forecastRange = usingForecast
+    ? `${fc7[0].date.substring(5)} → ${fc7[6].date.substring(5)}`
+    : 'historical avg';
+
+  if (lastInv !== null && projected7d > 0) {
+    const remainingAfter7d = lastInv - projected7d;
+    const worstRemaining   = lastInv - worst7d;
+    const dailyPace        = projected7d / 7;
+    const coverageDays     = dailyPace > 0 ? Math.floor(lastInv / dailyPace) : null;
+    const tag              = usingForecast ? 'forecast' : 'historical';
+
+    if (remainingAfter7d < ALERT_THRESHOLD) {
       banner.className = 'show crit';
-      text.innerHTML = `⚠ ALERT ${id}: Inventory (${fmt(lastInv,2)} MT) − Next month projection (${fmt(nextProj,2)} MT) = <strong>${fmt(remaining,2)} MT</strong> — BELOW 50 MT MINIMUM`;
-    } else if (worstCase < ALERT_THRESHOLD) {
+      text.innerHTML = `⚠ ALERT ${id}: Bulk inventory ${fmt(lastInv,2)} MT − next 7-day ${tag} consumption ${fmt(projected7d,2)} MT (${forecastRange}, ${fmt(dailyPace,2)} MT/day) = <strong>${fmt(remainingAfter7d,2)} MT</strong> — BELOW 50 MT MINIMUM (covers only ${coverageDays} days)`;
+    } else if (worstRemaining < ALERT_THRESHOLD) {
       banner.className = 'show warn';
-      text.innerHTML = `⚡ ATTENTION ${id}: In a pessimistic scenario, coverage drops to <strong>${fmt(worstCase,2)} MT</strong> — near the minimum threshold (base projection: ${fmt(remaining,2)} MT)`;
-    } else if (remaining < ALERT_THRESHOLD * 2) {
+      text.innerHTML = `⚡ ATTENTION ${id}: Base 7-day ${tag} leaves ${fmt(remainingAfter7d,2)} MT, but worst-case scenario drops to <strong>${fmt(worstRemaining,2)} MT</strong> — near the 50 MT minimum`;
+    } else if (coverageDays !== null && coverageDays < 14) {
       banner.className = 'show warn';
-      text.innerHTML = `⚡ CAUTION ${id}: Coverage after projected sales: <strong>${fmt(remaining,2)} MT</strong> — approaching the minimum threshold`;
+      text.innerHTML = `⚡ CAUTION ${id}: Coverage is <strong>${coverageDays} days</strong> at ${tag} pace (${fmt(dailyPace,2)} MT/day) — approaching the 7-day safety window`;
     } else {
       banner.className = 'show ok';
-      text.innerHTML = `✓ ${id}: Estimated coverage after projection: ${fmt(remaining,2)} MT — normal level`;
+      text.innerHTML = `✓ ${id}: Bulk inventory ${fmt(lastInv,2)} MT − next 7-day ${tag} consumption ${fmt(projected7d,2)} MT = ${fmt(remainingAfter7d,2)} MT remaining (${coverageDays} days coverage)`;
     }
+  } else if (lastInv !== null) {
+    banner.className = 'show ok';
+    text.innerHTML = `✓ ${id}: Bulk inventory ${fmt(lastInv,2)} MT — no daily sales data to project consumption`;
   } else {
     banner.className = '';
   }
