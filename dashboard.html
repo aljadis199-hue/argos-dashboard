@@ -239,9 +239,8 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <div class="isle-chip" style="border-left-color:var(--yellow);"><strong>ANU</strong><span>Antigua</span></div>
       <div class="isle-chip" style="border-left-color:var(--yellow);"><strong>DOM</strong><span>Dominica</span></div>
     </div>
-    <div class="name-row">
-      <input id="user-name" class="name-input" type="text" placeholder="Your name (e.g. Maria Lopez)" maxlength="40">
-      <button class="btn-enter" onclick="doLogin()">Enter</button>
+    <div class="name-row" style="justify-content:center;">
+      <button class="btn-enter" onclick="doLogin()" style="padding:12px 48px;font-size:15px;letter-spacing:3px;">Start</button>
     </div>
     <div class="login-note">Data is retrieved directly from SharePoint via Power Automate.<br>No credentials are stored locally.</div>
   </div>
@@ -985,7 +984,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function doLogin() {
-  const n = document.getElementById('user-name').value.trim() || 'User';
+  const n = 'Guest';
   sessionStorage.setItem('argos_user', n);
   document.getElementById('login-screen').classList.remove('show');
   startApp(n);
@@ -2396,9 +2395,10 @@ function renderDailySalesChart(id, dailySales, year, mFrom, mTo) {
   if (!el) return;
   const ctx = el.getContext('2d');
 
-  // Historical: filter by selected year/month range, deduplicate by date (sum totals)
+  // Historical: filter by selected year/month range + ignorar fechas futuras (errores de captura)
+  const _todayStrHist = new Date().toISOString().split('T')[0];
   const rawHistorical = dailySales.filter(r => {
-    if (!r.date) return false;
+    if (!r.date || r.date > _todayStrHist) return false;
     const [y,m] = r.date.split('-').map(Number);
     return y===year && m>=mFrom && m<=mTo;
   });
@@ -2412,7 +2412,8 @@ function renderDailySalesChart(id, dailySales, year, mFrom, mTo) {
   // 14-day forecast from ALL available daily data (not just current year filter)
   const today = new Date(); today.setHours(0,0,0,0);
   const todayStr = today.toISOString().split('T')[0];
-  const allSorted = dailySales.filter(r=>r.date&&r.total>=0).sort((a,b)=>a.date.localeCompare(b.date));
+  // Ignorar fechas futuras (errores de captura): nunca un dato "histórico" debe ser > hoy
+  const allSorted = dailySales.filter(r=>r.date&&r.total>=0 && r.date<=todayStr).sort((a,b)=>a.date.localeCompare(b.date));
   // Only show 14-day forecast when viewing current year and last data is recent (within 45 days)
   const lastDataDate = allSorted.length ? new Date(allSorted[allSorted.length-1].date+'T12:00:00') : null;
   const daysSinceLast = lastDataDate ? (today - lastDataDate)/(86400000) : 999;
@@ -2848,3 +2849,4 @@ function fmt(v, decimals = 2) {
 </script>
 </body>
 </html>
+
