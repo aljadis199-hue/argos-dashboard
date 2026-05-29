@@ -2653,10 +2653,24 @@ function generateRecommendations(id, lastInv, coverageDays, trendDir, trendPct, 
   return recs;
 }
 
-function generateReport() {
+async function generateReport() {
   const id = STATE.activeIsland;
   const raw = STATE.rawData?.islands?.[id];
   if (!raw || raw.error) { alert('No data available for current island.'); return; }
+
+  // Asegurar que tenemos fleet + customer warnings (cargar si no están)
+  if (!STATE.fleetData && ARGOS_CONFIG.FLEET_FLOW_URL && !ARGOS_CONFIG.FLEET_FLOW_URL.includes('REEMPLAZAR')) {
+    try {
+      const r = await fetch(ARGOS_CONFIG.FLEET_FLOW_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'getFleet'}) });
+      if (r.ok) STATE.fleetData = await r.json();
+    } catch(e) {}
+  }
+  if (!STATE.warningsData && ARGOS_CONFIG.WARNINGS_FLOW_URL && !ARGOS_CONFIG.WARNINGS_FLOW_URL.includes('REEMPLAZAR')) {
+    try {
+      const r = await fetch(ARGOS_CONFIG.WARNINGS_FLOW_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'getCustomerWarnings'}) });
+      if (r.ok) { STATE.warningsData = warnNormalize(await r.json()); warnSaveCache(STATE.warningsData); }
+    } catch(e) { STATE.warningsData = warnLoadCache(); }
+  }
 
   const { year, monthFrom, monthTo } = STATE.filters;
   const normalized = normalizeIslandData(raw, year, id);
@@ -2800,7 +2814,97 @@ function generateReport() {
     </div>`).join('')}
   </div>
 
-  ${sectionHead(7,'CHARTS SNAPSHOT','#101B46')}
+  ${(()=>{
+    // ─── NEXT SHIP / FLEET ANALYSIS ───
+    if (!STATE.fleetData) return sectionHead(7,'NEXT SHIP ANALYSIS','#3182CE')+
+      `<div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;color:#4A5568;">Fleet data not available. Visit the Next Ship tab to load voyages.</div></div>`;
+    const fleetIsl = id === 'USVI' ? 'STT' : id;
+    const allV = (STATE.fleetData.voyages || []).filter(v => v.idIsland === fleetIsl);
+    const seen = new Map();
+    [...allV].sort((a,b)=>(parseInt(b.id)||0)-(parseInt(a.id)||0))
+      .forEach(v => { const k = `${v.name}|${v.idIsland}|${(v.ea||'').substring(0,10)}`; if (!seen.has(k)) seen.set(k, v); });
+    const voyages = [...seen.values()].sort((a,b)=>new Date(b.ea)-new Date(a.ea)).slice(0,15);
+    if (!voyages.length) return sectionHead(7,'NEXT SHIP ANALYSIS','#3182CE')+
+      `<div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;color:#4A5568;">No voyages registered for ${fleetIsl}.</div></div>`;
+    const isAct = s => s===1||s==='1'||(typeof s==='string'&&s.toLowerCase().includes('transit'));
+    const isDel = s => s===2||s==='2'||(typeof s==='string'&&s.toLowerCase().includes('delay'));
+    const active = voyages.filter(v=>isAct(v.state));
+    const delayed = voyages.filter(v=>isDel(v.state));
+    const maxRisk = voyages.reduce((m,v)=>Math.max(m,parseFloat(v.stockoutrisk)||0),0);
+    const totalTons = active.reduce((s,v)=>s+(parseFloat(v.tons)||0),0);
+    const next = [...voyages].sort((a,b)=>new Date(b.ea)-new Date(a.ea))[0];
+    const fmtD = d => { if(!d) return '—'; const x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+    const stateTag = s => isAct(s)?'In Transit':isDel(s)?'Delayed':String(s||'—');
+    return sectionHead(7,'NEXT SHIP ANALYSIS','#3182CE')+`
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px;">
+      <tr ${hdr}><th ${th}>Metric</th><th ${thr}>Value</th><th ${th}>Note</th></tr>
+      <tr ${alt}>${td('<strong>Active Voyages</strong>')}${tdb(active.length,'text-align:right;')}${td('Currently in transit','color:#4A5568;')}</tr>
+      <tr>${td('<strong>Delayed Voyages</strong>')}${tdb(delayed.length,'text-align:right;'+(delayed.length>0?'color:#E53E3E;':''))}${td(delayed.length>0?'Requires attention':'On schedule','color:#4A5568;')}</tr>
+      <tr ${alt}>${td('<strong>Active Tons</strong>')}${tdb(fmt(totalTons,0)+' t','text-align:right;')}${td('Volume incoming','color:#4A5568;')}</tr>
+      <tr>${td('<strong>Max Stockout Risk</strong>')}${tdb(maxRisk.toFixed(1)+'%','text-align:right;'+(maxRisk>=80?'color:#E53E3E;':maxRisk>=50?'color:#D69E2E;':'color:#00B580;'))}${td(maxRisk>=80?'🔴 CRITICAL':maxRisk>=50?'🟡 MEDIUM':'🟢 LOW','color:#4A5568;')}</tr>
+      <tr ${alt}>${td('<strong>Next Arrival</strong>')}${tdb(next?fmtD(next.ea):'—','text-align:right;')}${td(next?next.name+' · '+(parseFloat(next.tons)||0).toLocaleString()+' t':'—','color:#4A5568;')}</tr>
+    </table>
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#4A5568;font-weight:600;margin-bottom:6px;">Recent Voyages (top ${voyages.length})</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <tr ${hdr}><th ${th}>Vessel</th><th ${th}>Type</th><th ${thr}>Tons</th><th ${th}>Op. Start</th><th ${th}>Op. End</th><th ${thr}>Risk</th><th ${th}>State</th></tr>
+      ${voyages.map((v,i)=>{
+        const bg=i%2===0?'background:#F5F6F7;':'';
+        const r=parseFloat(v.stockoutrisk)||0;
+        const rCol=r>=80?'color:#E53E3E;':r>=50?'color:#D69E2E;':'color:#00B580;';
+        return `<tr style="${bg}">${td('<strong>'+(v.name||'—')+'</strong>')}${td(v.type||'—')}${td((parseFloat(v.tons)||0).toLocaleString(),'text-align:right;')}${td(fmtD(v.operationStart))}${td(fmtD(v.operationComplete))}${td(r.toFixed(1)+'%','text-align:right;'+rCol+'font-weight:700;')}${td(stateTag(v.state))}</tr>`;
+      }).join('')}
+    </table></div>`;
+  })()}
+
+  ${(()=>{
+    // ─── CUSTOMER WARNINGS ANALYSIS ───
+    if (!STATE.warningsData) return sectionHead(8,'CUSTOMER WARNINGS','#E53E3E')+
+      `<div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;color:#4A5568;">Customer warnings data not available. Visit the Customer Warnings tab to load data.</div></div>`;
+    const warnIsl = id === 'USVI' ? 'STT' : id;
+    const block = STATE.warningsData.islands?.[warnIsl];
+    if (!block || !block.warnings || !block.warnings.length)
+      return sectionHead(8,'CUSTOMER WARNINGS','#E53E3E')+
+      `<div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;color:#4A5568;">No customer warnings registered for ${warnIsl}.</div></div>`;
+    const rows = block.warnings.map(w => ({
+      customer: (w.customer||'').trim(),
+      product: (w.product||'').trim(),
+      material_id: (w.material_id||'').trim(),
+      lastVolumen: parseFloat(w.lastVolumen)||0,
+      lastPurchase: w.lastPurchase||null,
+      churnProb: parseFloat(w.churnProb)||0
+    })).sort((a,b)=>b.churnProb-a.churnProb);
+    const critical = rows.filter(r=>r.churnProb>=0.80);
+    const high     = rows.filter(r=>r.churnProb>=0.50&&r.churnProb<0.80);
+    const uniq     = new Set(rows.filter(r=>r.churnProb>=0.5).map(r=>r.customer)).size;
+    const volRisk  = rows.filter(r=>r.churnProb>=0.5).reduce((s,r)=>s+r.lastVolumen,0);
+    const updated  = block.updated ? new Date(block.updated).toLocaleString('en-GB') : '—';
+    const fmtD2 = d => { if(!d) return '—'; const x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+    const daysSince = iso => { if(!iso) return null; const d=new Date(iso); return isNaN(d)?null:Math.floor((Date.now()-d.getTime())/86400000); };
+    const top = rows.slice(0,20);
+    return sectionHead(8,'CUSTOMER WARNINGS','#E53E3E')+`
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px;">
+      <tr ${hdr}><th ${th}>Metric</th><th ${thr}>Value</th><th ${th}>Assessment</th></tr>
+      <tr ${alt}>${td('<strong>Total Warnings</strong>')}${tdb(rows.length,'text-align:right;')}${td('Cache updated: '+updated,'color:#4A5568;font-size:10px;')}</tr>
+      <tr>${td('<strong>Critical Churn (≥80%)</strong>')}${tdb(critical.length,'text-align:right;'+(critical.length>0?'color:#E53E3E;':''))}${td(critical.length>0?'🔴 Likely lost customers':'🟢 None','color:#4A5568;')}</tr>
+      <tr ${alt}>${td('<strong>High Churn (50–79%)</strong>')}${tdb(high.length,'text-align:right;'+(high.length>0?'color:#D69E2E;':''))}${td(high.length>0?'🟡 Immediate contact needed':'🟢 None','color:#4A5568;')}</tr>
+      <tr>${td('<strong>Unique Customers @Risk</strong>')}${tdb(uniq,'text-align:right;')}${td('Churn ≥ 50%','color:#4A5568;')}</tr>
+      <tr ${alt}>${td('<strong>Vol. Last Purchase @Risk</strong>')}${tdb(fmt(volRisk,2)+' MT/un','text-align:right;')}${td('Sum of last purchase volumes','color:#4A5568;')}</tr>
+    </table>
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#4A5568;font-weight:600;margin-bottom:6px;">Top ${top.length} Customers at Risk (sorted by churn prob.)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <tr ${hdr}><th ${th}>Customer</th><th ${th}>Product</th><th ${thr}>Last Vol.</th><th ${th}>Last Purchase</th><th ${thr}>Days</th><th ${thr}>Churn</th></tr>
+      ${top.map((r,i)=>{
+        const bg=i%2===0?'background:#F5F6F7;':'';
+        const cp=r.churnProb;
+        const cCol=cp>=0.8?'color:#E53E3E;':cp>=0.5?'color:#D69E2E;':cp>=0.2?'color:#3182CE;':'color:#00B580;';
+        const ds=daysSince(r.lastPurchase);
+        const dCol=ds&&ds>60?'color:#E53E3E;':ds&&ds>30?'color:#D69E2E;':'color:#4A5568;';
+        return `<tr style="${bg}">${td('<strong>'+(r.customer||'—')+'</strong>')}${td(r.product||'—','font-size:10px;color:#4A5568;')}${td(fmt(r.lastVolumen,2),'text-align:right;')}${td(fmtD2(r.lastPurchase))}${td(ds!=null?ds+'d':'—','text-align:right;'+dCol)}${td((cp*100).toFixed(0)+'%','text-align:right;'+cCol+'font-weight:700;')}</tr>`;
+      }).join('')}
+    </table></div>`;
+  })()}
+
+  ${sectionHead(9,'CHARTS SNAPSHOT','#101B46')}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
     <div>
       ${chartImg('chart-inv-'+id, 'Monthly Inventory (MT)')}
@@ -2849,6 +2953,7 @@ function fmt(v, decimals = 2) {
 </script>
 </body>
 </html>
+
 
 
 
