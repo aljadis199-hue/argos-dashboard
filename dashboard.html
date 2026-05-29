@@ -97,6 +97,12 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
 .filter-select:focus,.filter-input:focus{outline:none;border-color:var(--navy);}
 .filter-sep{width:1px;height:28px;background:var(--border);}
 .btn-apply{background:var(--navy);color:#fff;border:none;border-radius:5px;padding:7px 16px;font-family:var(--display);font-weight:700;font-size:12px;cursor:pointer;}
+.report-isle-item{background:#fff;border:none;border-bottom:1px solid var(--border);width:100%;padding:10px 14px;text-align:left;cursor:pointer;font-family:var(--body);display:flex;align-items:center;gap:10px;transition:background .12s;}
+.report-isle-item:last-child{border-bottom:none;}
+.report-isle-item:hover{background:#FAFFE5;}
+.report-isle-item strong{font-family:var(--display);font-weight:800;font-size:14px;color:var(--navy);letter-spacing:1.5px;min-width:46px;}
+.report-isle-item span{font-size:12px;color:var(--muted);}
+.report-isle-item.active{background:#F0FFF4;border-left:3px solid var(--teal);}
 .btn-apply:hover{background:#1a2a6e;}
 .btn-reset{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:7px 12px;font-size:12px;cursor:pointer;}
 
@@ -253,7 +259,24 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
     <div class="h-right">
       <div class="pulse-row"><div class="pulse" id="pulse-dot"></div><span id="last-update-txt">Loading…</span></div>
       <button class="hbtn" onclick="refreshData()">↻ Refresh</button>
-      <button class="hbtn" onclick="generateReport()" style="border-color:rgba(194,213,0,.4);color:rgba(194,213,0,.9);">↓ Report</button>
+      <div style="position:relative;" id="report-dropdown-wrap">
+        <button class="hbtn" onclick="toggleReportDropdown(event)" style="border-color:rgba(194,213,0,.4);color:rgba(194,213,0,.9);" title="Generate a PDF report for one of the four terminals.">↓ Report ▾</button>
+        <div id="report-dropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border-radius:6px;box-shadow:0 8px 24px rgba(16,27,70,.25);min-width:220px;overflow:hidden;border:1px solid var(--border);z-index:150;">
+          <div style="background:var(--navy);color:#fff;padding:8px 12px;font-family:var(--display);font-weight:700;font-size:11px;letter-spacing:2px;">SELECT ISLAND</div>
+          <button class="report-isle-item" onclick="confirmReport('SXM')" data-isle="SXM">
+            <strong>SXM</strong><span>Saint Maarten</span>
+          </button>
+          <button class="report-isle-item" onclick="confirmReport('USVI')" data-isle="USVI">
+            <strong>USVI</strong><span>Saint Thomas</span>
+          </button>
+          <button class="report-isle-item" onclick="confirmReport('ANU')" data-isle="ANU">
+            <strong>ANU</strong><span>Antigua &amp; Barbuda</span>
+          </button>
+          <button class="report-isle-item" onclick="confirmReport('DOM')" data-isle="DOM">
+            <strong>DOM</strong><span>Dominica</span>
+          </button>
+        </div>
+      </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <div class="avatar" id="header-avatar">?</div>
         <span class="uname" id="header-name"></span>
@@ -651,7 +674,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <!-- KPI row — populated by loadFleetData() -->
       <div id="fleet-kpis" class="kpi-metrics-grid" style="margin-bottom:14px;">
         <div class="kpi" style="grid-column:1/-1;color:var(--muted);text-align:center;padding:24px;">
-          Cargando datos de flota...
+          Loading fleet data...
         </div>
       </div>
       <!-- Island risk cards — populated by loadFleetData() -->
@@ -665,7 +688,7 @@ main{flex:1;padding:20px 28px;max-width:1800px;margin:0 auto;width:100%;}
       <!-- KPI row -->
       <div id="warn-kpis" class="kpi-metrics-grid" style="margin-bottom:14px;grid-template-columns:repeat(5,1fr);">
         <div class="kpi" style="grid-column:1/-1;color:var(--muted);text-align:center;padding:24px;">
-          Cargando alertas de clientes...
+          Loading customer warnings...
         </div>
       </div>
       <!-- Island summary cards -->
@@ -1160,32 +1183,32 @@ function renderFleetData(data) {
   const rClass = maxRisk >= 80 ? 'crit' : maxRisk >= 50 ? 'warn' : '';
 
   document.getElementById('fleet-kpis').innerHTML = `
-    <div class="kpi info">
+    <div class="kpi info" title="Number of vessels currently in transit toward one of the four terminals (SXM, DOM, ANU, STT). State is reported by the fleet system and updated each cycle.">
       <div class="kpi-label">Active Voyages</div>
       <div class="kpi-value" style="font-size:28px;">${active.length}</div>
       <div class="kpi-sub">SXM / DOM / ANU / STT</div>
     </div>
-    <div class="kpi ${rClass}">
+    <div class="kpi ${rClass}" title="Highest stockout risk among all voyages on screen. Risk is the probability (0–100%) that the destination terminal runs out of inventory before the cargo arrives. ≥80% is CRITICAL, 50–79% is HIGH, below 50% is normal.">
       <div class="kpi-label">Max Stockout Risk</div>
       <div class="kpi-value" style="color:${rColor};">${maxRisk.toFixed(1)}%</div>
       <div class="kpi-sub">${maxVessel ? maxVessel.idIsland + ' · ' + maxVessel.name : '—'}</div>
     </div>
-    <div class="kpi lime">
+    <div class="kpi lime" title="Total cargo (in metric tons) currently in transit across active voyages. Use this to size near-term replenishment for the four terminals.">
       <div class="kpi-label">Tons in Transit</div>
       <div class="kpi-value">${totalTons.toLocaleString()}</div>
-      <div class="kpi-sub">Voyages activos · 4 islands</div>
+      <div class="kpi-sub">Active voyages · 4 islands</div>
     </div>
-    <div class="kpi ${delayed.length > 0 ? 'warn' : ''}">
+    <div class="kpi ${delayed.length > 0 ? 'warn' : ''}" title="Voyages reported as delayed. The sub-line shows the cargo (in tons) affected by those delays — this is the volume that will arrive later than originally scheduled.">
       <div class="kpi-label">Delayed Voyages</div>
       <div class="kpi-value" style="color:${delayed.length > 0 ? 'var(--yellow)' : 'inherit'};">${delayed.length}</div>
       <div class="kpi-sub">${delayedTons.toLocaleString()} t affected</div>
     </div>
-    <div class="kpi">
+    <div class="kpi" title="Vessel with the most recent estimated arrival date (latest 'ea' field). Sub-line shows destination island, ETA and tons aboard.">
       <div class="kpi-label">Next Arrival</div>
       <div class="kpi-value small">${next ? next.name : '—'}</div>
       <div class="kpi-sub">${next ? next.idIsland + ' · ' + fleetFmtDate(next.ea) + ' · ' + (parseFloat(next.tons) || 0).toLocaleString() + ' t' : '—'}</div>
     </div>
-    <div class="kpi purple">
+    <div class="kpi purple" title="Timestamp of the last data refresh from Azure SQL via Power Automate. Click Refresh in the dashboard header to force an update.">
       <div class="kpi-label">Data Updated</div>
       <div class="kpi-value small" style="font-size:12px;padding-top:4px;">${updated}</div>
       <div class="kpi-sub">Azure SQL · Power Automate</div>
@@ -1200,18 +1223,18 @@ function renderFleetData(data) {
     const bc = mr >= 80 ? 'alert' : mr >= 50 ? 'warn' : '';
     const tag = mr >= 80 ? 'CRITICAL' : mr >= 50 ? 'HIGH' : 'NORMAL';
     const ts  = mr >= 50 && mr < 80 ? 'style="background:rgba(214,158,46,.12);color:var(--yellow);"' : '';
-    return `<div class="chart-card" style="border-top:3px solid ${c};">
+    return `<div class="chart-card" style="border-top:3px solid ${c};" title="${isl} (${ISL_NAMES[isl]}) — highest stockout risk among the voyages registered for this island. The big number is the maximum risk; the bar visualises 0% → 100%. CRITICAL (red) ≥80%, HIGH (yellow) 50–79%, NORMAL (green) below 50%.">
       <div class="chart-header">
         <div><div class="chart-title">${isl} — ${ISL_NAMES[isl]}</div>
-        <div class="chart-sub">${tv ? (tv.inventory_name || tv.type || '') : 'Sin datos'}</div></div>
-        <span class="chart-badge ${bc}">${mr.toFixed(1)}% RISK</span>
+        <div class="chart-sub">${tv ? (tv.inventory_name || tv.type || '') : 'No data'}</div></div>
+        <span class="chart-badge ${bc}" title="Stockout risk reported for the worst voyage of this island (0–100%).">${mr.toFixed(1)}% RISK</span>
       </div>
-      <div style="font-family:var(--display);font-weight:800;font-size:32px;color:${c};margin:4px 0;">${mr.toFixed(1)}%</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">${tv ? tv.name + ' &nbsp;·&nbsp; ' + fleetFmtDate(tv.ea) + ' &nbsp;·&nbsp; ' + (parseFloat(tv.tons)||0).toLocaleString() + ' t' : '—'}</div>
-      <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden;">
+      <div style="font-family:var(--display);font-weight:800;font-size:32px;color:${c};margin:4px 0;" title="Maximum stockout risk for ${isl}.">${mr.toFixed(1)}%</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;" title="${tv ? 'Vessel · ETA · tons aboard' : 'No voyages registered for this island'}">${tv ? tv.name + ' &nbsp;·&nbsp; ' + fleetFmtDate(tv.ea) + ' &nbsp;·&nbsp; ' + (parseFloat(tv.tons)||0).toLocaleString() + ' t' : '—'}</div>
+      <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden;" title="Visual scale of the risk: full bar = 100%.">
         <div style="width:${Math.min(mr,100)}%;height:100%;background:${c};border-radius:4px;"></div>
       </div>
-      <div style="margin-top:8px;"><span class="alert-tag" ${ts}>${tag}</span></div>
+      <div style="margin-top:8px;"><span class="alert-tag" ${ts} title="Severity classification of the current max risk.">${tag}</span></div>
     </div>`;
   }).join('');
 
@@ -1239,8 +1262,14 @@ function renderFleetData(data) {
     </div>
     <table class="proj-table">
       <thead><tr>
-        <th>Island</th><th>Vessel</th><th>Type</th><th>Tons</th>
-        <th>Op. Start</th><th>Op. End</th><th>Stockout Risk</th><th>State</th>
+        <th title="Destination terminal (SXM, DOM, ANU or STT).">Island</th>
+        <th title="Vessel name as registered in the fleet system.">Vessel</th>
+        <th title="Cargo type or inventory category for the voyage.">Type</th>
+        <th title="Cargo aboard in metric tons.">Tons</th>
+        <th title="Date the operation (loading/discharge) started.">Op. Start</th>
+        <th title="Date the operation finished (or expected end date).">Op. End</th>
+        <th title="Probability (0–100%) that the destination runs out of inventory before the cargo arrives. ≥80% CRITICAL, 50–79% HIGH.">Stockout Risk</th>
+        <th title="Current voyage state — In Transit, Delayed, or other status reported by the fleet system.">State</th>
       </tr></thead>
       <tbody>${voyages.map(v => `
         <tr>
@@ -1418,30 +1447,30 @@ function renderCustomerWarnings(data, notice) {
   const uniqueCustomers = new Set(allRows.filter(r => r.churnProb >= 0.5).map(r => r.customer)).size;
 
   document.getElementById('warn-kpis').innerHTML = `
-    <div class="kpi">
+    <div class="kpi" title="Total number of customer warnings registered across all four islands (SXM, DOM, ANU, STT). A warning means the churn model has flagged that customer-product pair as having some probability of being lost.">
       <div class="kpi-label">Total Warnings</div>
       <div class="kpi-value" style="font-size:28px;">${allRows.length}</div>
       <div class="kpi-sub">SXM · DOM · ANU · STT</div>
     </div>
-    <div class="kpi crit">
+    <div class="kpi crit" title="Customers with churn probability of 80% or higher. These customers are likely already lost — recovery actions may not be effective. Use this to size potential revenue loss.">
       <div class="kpi-label">Critical (&ge; 80%)</div>
       <div class="kpi-value" style="color:var(--red);">${critical.length}</div>
-      <div class="kpi-sub">Cliente probablemente perdido</div>
+      <div class="kpi-sub">Customer likely lost</div>
     </div>
-    <div class="kpi warn">
+    <div class="kpi warn" title="Customers with churn probability between 50% and 79%. These need immediate sales contact — they have not bought recently but may still be recoverable.">
       <div class="kpi-label">High (50–79%)</div>
       <div class="kpi-value" style="color:var(--yellow);">${high.length}</div>
-      <div class="kpi-sub">Requiere contacto inmediato</div>
+      <div class="kpi-sub">Immediate contact required</div>
     </div>
-    <div class="kpi info">
+    <div class="kpi info" title="Number of distinct customers (across all islands) with churn probability of 50% or higher. One customer can have multiple warnings for different products — this counts each customer once.">
       <div class="kpi-label">Unique Customers @Risk</div>
       <div class="kpi-value" style="font-size:28px;">${uniqueCustomers}</div>
       <div class="kpi-sub">Churn &ge; 50%</div>
     </div>
-    <div class="kpi">
+    <div class="kpi" title="Sum of the last purchase volumes (MT or units) from all customers with churn probability of 50% or higher. Approximates the monthly volume at risk if these customers stop buying.">
       <div class="kpi-label">Vol. Last Purchase @Risk</div>
       <div class="kpi-value" style="font-size:24px;">${totalVolAtRisk.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
-      <div class="kpi-sub">Suma últimas compras (MT/un)</div>
+      <div class="kpi-sub">Sum of last purchases (MT/un)</div>
     </div>`;
 
   // Island cards
@@ -1457,20 +1486,20 @@ function renderCustomerWarnings(data, notice) {
     const islandName = (ARGOS_CONFIG.ISLANDS[k === 'STT' ? 'USVI' : k] || {}).name || k;
     const upd = block.updated ? new Date(block.updated).toLocaleString('es-ES') : '—';
     return `
-      <div class="chart-card">
+      <div class="chart-card" title="${k} (${islandName}) — ${rows.length} customer warnings registered. The badge shows how many of those have critical churn probability (≥ 80%). The list below shows the top-3 customers at highest risk in this island.">
         <div class="chart-header">
           <div>
             <div class="chart-title">${k} — ${islandName}</div>
             <div class="chart-sub">${rows.length} warnings · ${upd}</div>
           </div>
-          <span class="chart-badge ${crit>0?'alert':''}" style="${crit>0?'':'background:rgba(0,181,128,.1);color:var(--teal);'}">${crit} crítico${crit===1?'':'s'}</span>
+          <span class="chart-badge ${crit>0?'alert':''}" style="${crit>0?'':'background:rgba(0,181,128,.1);color:var(--teal);'}" title="Number of customers in this island with churn probability of 80% or higher.">${crit} critical</span>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--display);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Top Risk</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--display);font-weight:700;text-transform:uppercase;letter-spacing:.5px;" title="Top-3 customers in this island ranked by highest churn probability.">Top Risk</div>
         ${top.length ? top.map(r => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-            <span style="color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;" title="${r.customer}">${r.customer || '—'}</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;" title="${r.customer} — churn probability ${(r.churnProb*100).toFixed(0)}%">
+            <span style="color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${r.customer || '—'}</span>
             ${warnChurnBadge(r.churnProb)}
-          </div>`).join('') : '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Sin warnings</div>'}
+          </div>`).join('') : '<div style="color:var(--muted);font-size:12px;padding:6px 0;">No warnings</div>'}
       </div>`;
   }).join('');
 
@@ -1503,29 +1532,35 @@ function renderWarningsTable(allRows, updated, notice) {
     ${noticeBar}
     <div class="chart-header">
       <div>
-        <div class="chart-title">Customer Warnings — ${islandSel}</div>
-        <div class="chart-sub">SharePoint cache · Power Automate · ${rows.length} registros · ${updated}</div>
+        <div class="chart-title" title="Detailed list of customer warnings for the currently selected island. Filters apply only to this table — not to the KPIs above.">Customer Warnings — ${islandSel}</div>
+        <div class="chart-sub">SharePoint cache · Power Automate · ${rows.length} records · ${updated}</div>
       </div>
-      <span class="chart-badge alert">&#9888; Churn Risk</span>
+      <span class="chart-badge alert" title="This data comes from a churn-risk model that scores how likely each customer is to stop buying.">&#9888; Churn Risk</span>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:var(--radius);">
-      <label style="font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;">Nivel</label>
-      <select class="filter-select" id="warn-f-level" onchange="warnApplyFilter()">
-        <option value="all"${WARN_FILTERS.level==='all'?' selected':''}>Todos</option>
+      <label style="font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;" title="Filter the table by churn-probability bucket.">Level</label>
+      <select class="filter-select" id="warn-f-level" onchange="warnApplyFilter()" title="Critical ≥80% · High 50–79% · Medium 20–49% · Low <20%">
+        <option value="all"${WARN_FILTERS.level==='all'?' selected':''}>All</option>
         <option value="critical"${WARN_FILTERS.level==='critical'?' selected':''}>Critical (&ge;80%)</option>
         <option value="high"${WARN_FILTERS.level==='high'?' selected':''}>High (50–79%)</option>
         <option value="medium"${WARN_FILTERS.level==='medium'?' selected':''}>Medium (20–49%)</option>
         <option value="low"${WARN_FILTERS.level==='low'?' selected':''}>Low (&lt;20%)</option>
       </select>
-      <label style="font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;">Buscar</label>
-      <input class="filter-input" id="warn-f-search" type="text" placeholder="Cliente, producto, material..." value="${WARN_FILTERS.search.replace(/"/g,'&quot;')}" oninput="warnApplyFilter()" style="min-width:220px;">
-      <button class="btn-apply" onclick="warnExportCSV()" style="margin-left:auto;background:var(--teal);">&#8681; Export CSV</button>
-      <button class="btn-apply" onclick="loadCustomerWarnings()">Refresh</button>
+      <label style="font-family:var(--display);font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;" title="Text search across customer name, product description and material ID.">Search</label>
+      <input class="filter-input" id="warn-f-search" type="text" placeholder="Customer, product, material..." value="${WARN_FILTERS.search.replace(/"/g,'&quot;')}" oninput="warnApplyFilter()" style="min-width:220px;" title="Free-text search across customer, product and material columns.">
+      <button class="btn-apply" onclick="warnExportCSV()" style="margin-left:auto;background:var(--teal);" title="Download all customer warnings (4 islands) as a CSV file.">&#8681; Export CSV</button>
+      <button class="btn-apply" onclick="loadCustomerWarnings()" title="Reload data from the Power Automate flow (SharePoint cache).">Refresh</button>
     </div>
     <table class="proj-table">
       <thead><tr>
-        <th>Island</th><th>Customer</th><th>Product</th><th>Material ID</th>
-        <th>Last Volume</th><th>Last Purchase</th><th>Days Since</th><th>Churn Prob.</th>
+        <th title="Terminal where the customer operates (SXM, DOM, ANU or STT).">Island</th>
+        <th title="Customer name as registered in the sales system.">Customer</th>
+        <th title="Product description for which the warning was generated.">Product</th>
+        <th title="Internal material code that identifies the SKU.">Material ID</th>
+        <th title="Volume of the customer's last purchase (MT for bulk, units for bagged).">Last Volume</th>
+        <th title="Date of the customer's most recent purchase of this product.">Last Purchase</th>
+        <th title="Number of days elapsed since the last purchase — red after 60 days, yellow after 30.">Days Since</th>
+        <th title="Probability that the customer will not buy again (0–100%). The higher, the worse — ≥80% means likely lost.">Churn Prob.</th>
       </tr></thead>
       <tbody>${rows.length ? rows.map(r => {
         const ds = warnDaysSince(r.lastPurchase);
@@ -1540,7 +1575,7 @@ function renderWarningsTable(allRows, updated, notice) {
           <td class="val" style="color:${ds && ds>60 ? 'var(--red)' : ds && ds>30 ? 'var(--yellow)' : 'var(--muted)'};">${ds!=null?ds+' d':'—'}</td>
           <td>${warnChurnBadge(r.churnProb)}</td>
         </tr>`;
-      }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px;">Sin registros con los filtros actuales</td></tr>`}
+      }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px;">No records match the current filters</td></tr>`}
       </tbody>
     </table>`;
 }
@@ -2653,6 +2688,41 @@ function generateRecommendations(id, lastInv, coverageDays, trendDir, trendPct, 
   return recs;
 }
 
+// ───── REPORT ISLAND DROPDOWN ─────
+function toggleReportDropdown(ev) {
+  if (ev) ev.stopPropagation();
+  const dd = document.getElementById('report-dropdown');
+  const isOpen = dd.style.display === 'block';
+  closeReportDropdown();
+  if (!isOpen) {
+    // marcar la isla activa
+    const active = STATE.activeIsland;
+    document.querySelectorAll('.report-isle-item').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-isle') === active);
+    });
+    dd.style.display = 'block';
+    // cerrar al hacer click fuera
+    setTimeout(() => document.addEventListener('click', closeReportDropdownOnce), 0);
+  }
+}
+function closeReportDropdown() {
+  const dd = document.getElementById('report-dropdown');
+  if (dd) dd.style.display = 'none';
+  document.removeEventListener('click', closeReportDropdownOnce);
+}
+function closeReportDropdownOnce(ev) {
+  if (!document.getElementById('report-dropdown-wrap').contains(ev.target)) closeReportDropdown();
+}
+async function confirmReport(id) {
+  closeReportDropdown();
+  // Si la isla seleccionada no es la activa, cambiar primero y dejar a Chart.js renderizar
+  if (id !== STATE.activeIsland) {
+    switchIsland(id);
+    await new Promise(r => setTimeout(r, 350));  // esperar a que rendericen los charts
+  }
+  await generateReport();
+}
+
 async function generateReport() {
   const id = STATE.activeIsland;
   const raw = STATE.rawData?.islands?.[id];
@@ -2857,7 +2927,7 @@ async function generateReport() {
   })()}
 
   ${(()=>{
-    // ─── CUSTOMER WARNINGS ANALYSIS ───
+    // ─── CUSTOMER WARNINGS ANALYSIS (SELECTED ISLAND ONLY) ───
     if (!STATE.warningsData) return sectionHead(8,'CUSTOMER WARNINGS','#E53E3E')+
       `<div style="background:#F5F6F7;border-radius:6px;padding:14px 18px;font-size:12px;color:#4A5568;">Customer warnings data not available. Visit the Customer Warnings tab to load data.</div></div>`;
     const warnIsl = id === 'USVI' ? 'STT' : id;
@@ -2904,20 +2974,36 @@ async function generateReport() {
     </table></div>`;
   })()}
 
-  ${sectionHead(9,'CHARTS SNAPSHOT','#101B46')}
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
-    <div>
-      ${chartImg('chart-inv-'+id, 'Monthly Inventory (MT)')}
-      ${chartImg('chart-sales-line-'+id, 'Total Sales Trend')}
-      ${chartImg('chart-daily-'+id, 'Daily Sales Movement')}
-    </div>
-    <div>
-      ${chartImg('chart-cif-'+id, 'CIF Import Cost (USD/MT)')}
-      ${chartImg('chart-products-'+id, 'Sales by Product')}
-      ${chartImg('chart-proj-'+id, 'Sales Projections & Forecast')}
-    </div>
-  </div>
-  </div>
+  ${(()=>{
+    // Helper: render chart en ancho completo, con avoid page break
+    const big = (canvasId, label) => {
+      const el = document.getElementById(canvasId);
+      if (!el) return '';
+      try {
+        const src = el.toDataURL('image/png');
+        return `<div style="page-break-inside:avoid;margin-bottom:22px;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:#101B46;border-left:3px solid #C2D500;padding-left:10px;margin-bottom:8px;">${label}</div>
+          <img src="${src}" style="width:100%;max-height:280px;object-fit:contain;border-radius:6px;border:1px solid #E2E8F0;">
+        </div>`;
+      } catch(e) { return ''; }
+    };
+    const charts = [
+      big('chart-inv-'+id, 'Monthly Inventory (MT)'),
+      big('chart-cif-'+id, 'CIF Import Cost (USD/MT)'),
+      big('chart-sales-line-'+id, 'Total Sales Trend'),
+      big('chart-products-'+id, 'Sales by Product'),
+      big('chart-daily-'+id, 'Daily Sales Movement'),
+      big('chart-proj-'+id, 'Sales Projections & Forecast')
+    ];
+    let out = sectionHead(9,'CHARTS SNAPSHOT','#101B46');
+    // 3 charts per page (1 column, full width)
+    charts.forEach((c, i) => {
+      out += c;
+      // Forzar salto de página después del 3er chart (índice 2)
+      if (i === 2) out += '<div style="page-break-after:always;"></div>';
+    });
+    return out + '</div>';
+  })()}
 
   <div style="border-top:2px solid #E2E8F0;padding-top:12px;margin-top:12px;font-size:10px;color:#718096;display:flex;justify-content:space-between;">
     <div>ARGOS Operations Intelligence — ${id} · ${INAMES[id]||id} — VP RCCA Caribbean Terminals</div>
