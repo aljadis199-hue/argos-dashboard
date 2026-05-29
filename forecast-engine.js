@@ -236,7 +236,9 @@
   // Day-of-week seasonality (last 90 days) + Holt Linear 30-day trend
   function dailyForecast(dailySales, daysAhead=14) {
     if(!dailySales||dailySales.length<14) return [];
-    const sorted=[...dailySales].filter(r=>r.date&&r.total>=0).sort((a,b)=>a.date.localeCompare(b.date));
+    const todayStr = new Date().toISOString().split('T')[0];
+    // Ignorar fechas futuras (datos con fecha > hoy son errores de captura — no tiene sentido proyectar desde el futuro)
+    const sorted=[...dailySales].filter(r=>r.date&&r.total>=0 && r.date<=todayStr).sort((a,b)=>a.date.localeCompare(b.date));
     if(sorted.length<14) return [];
 
     // DOW seasonality indices from last 90 days
@@ -268,3 +270,4 @@
   global.ArgosForecaster = { forecast, dailyForecast };
 
 })(window);
+
