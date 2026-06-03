@@ -2530,18 +2530,43 @@ function renderProjTable(id, inv, sales, allSales) {
 
   const lastInv = inv.length ? inv[inv.length-1].value : null;
   const today = new Date();
+  const curYM = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0');
+  const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
+  const dayOfMonth = today.getDate();
+  // Mes "completo" solo si ya pasaron al menos 95% de los días (ej. día 29 de un mes de 30)
+  const currentMonthIsComplete = (dayOfMonth / lastDayOfMonth) >= 0.95;
 
   // Use full history for forecast (allSales), filtered view for historical display
-  const forecastData = (allSales && allSales.length >= sales.length) ? allSales : sales;
+  // EXCLUIR mes en curso si no está completo (los datos parciales distorsionan el modelo)
+  const rawForecastData = (allSales && allSales.length >= sales.length) ? allSales : sales;
+  const forecastData = currentMonthIsComplete ? rawForecastData : rawForecastData.filter(r => r.month !== curYM);
   const ef = ensembleForecast(forecastData, 3);
   const rows = [];
 
-  // Historical rows with linReg back-test
-  const totals = sales.map(r=>r.total);
-  const reg = linReg(totals);
-  sales.forEach((r,i) => {
-    const proj = Math.max(0, reg.slope*i+reg.intercept);
-    rows.push({ label:monthLabel(r.month), actual:r.total, projected:proj, low:null, high:null, delta:r.total-proj, isProj:false, month:r.month });
+  // Historical rows — usar fitted del ensemble (Holt-Winters, AR, Seasonal Naive, etc.)
+  // En lugar de una regresión lineal plana, lo cual da predicciones mucho más acertadas
+  const cleanSales = currentMonthIsComplete ? sales : sales.filter(r => r.month !== curYM);
+  const totals = cleanSales.map(r=>r.total);
+  const reg = linReg(totals);  // fallback si el ensemble no produjo fitted
+
+  // Mapa month → fitted del ensemble (los datos del forecaster, que ya excluye el mes parcial)
+  const fittedByMonth = {};
+  if (ef && ef.fitted) {
+    forecastData.forEach((r, i) => { fittedByMonth[r.month] = ef.fitted[i]; });
+  }
+
+  sales.forEach((r) => {
+    const isPartial = (r.month === curYM) && !currentMonthIsComplete;
+    // Prioridad: fitted del ensemble; fallback: regresión lineal
+    let proj;
+    if (fittedByMonth[r.month] != null && isFinite(fittedByMonth[r.month])) {
+      proj = fittedByMonth[r.month];
+    } else {
+      const cleanIdx = cleanSales.findIndex(c => c.month === r.month);
+      const useIdx = cleanIdx === -1 ? cleanSales.length : cleanIdx;
+      proj = Math.max(0, reg.slope*useIdx+reg.intercept);
+    }
+    rows.push({ label:monthLabel(r.month), actual:r.total, projected:proj, low:null, high:null, delta:isPartial?null:(r.total-proj), isProj:false, isPartial, month:r.month });
   });
 
   // Forward projected rows (only future months)
@@ -2560,9 +2585,34 @@ function renderProjTable(id, inv, sales, allSales) {
     });
   }
 
-  const modelInfo = ef ? `<div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--bg-alt);">
-    Model: <strong>${ef.model}</strong>${ef.mape!==null?' · Historical accuracy: <strong>'+fmt((1-ef.mape)*100,2)+'%</strong>':''}
-    ${!ef.hasEnoughData?'<span style="color:var(--yellow);"> · ≥7 months recommended for better accuracy</span>':''}
+  // ── R² del ensemble sobre datos limpios (excluye mes parcial) ──
+  // Usa fitted del modelo si está disponible (más justo), si no la regresión lineal
+  let r2 = null;
+  if (cleanSales.length >= 2) {
+    const yMean = totals.reduce((s,v)=>s+v,0) / totals.length;
+    let ssRes = 0, ssTot = 0;
+    cleanSales.forEach((rec, i) => {
+      const y = rec.total;
+      const fittedVal = fittedByMonth[rec.month];
+      const yHat = (fittedVal != null && isFinite(fittedVal))
+        ? fittedVal
+        : Math.max(0, reg.slope*i + reg.intercept);
+      ssRes += (y - yHat) ** 2;
+      ssTot += (y - yMean) ** 2;
+    });
+    r2 = ssTot > 0 ? (1 - ssRes/ssTot) : null;  // puede ser negativo si peor que predecir la media
+  }
+  const r2Color = r2 === null ? 'var(--muted)' : r2 >= 0.7 ? 'var(--teal)' : r2 >= 0.4 ? 'var(--yellow)' : 'var(--red)';
+  const r2Label = r2 === null ? '—' : r2 >= 0.7 ? 'strong fit' : r2 >= 0.4 ? 'moderate fit' : r2 >= 0 ? 'weak fit' : 'worse than mean';
+
+  const accuracyPct = ef && ef.mape!==null ? Math.max(0, Math.min(100, (1-ef.mape)*100)) : null;
+  const mapePct = ef && ef.mape!==null ? ef.mape*100 : null;
+  const partialNote = !currentMonthIsComplete && rawForecastData.some(r => r.month === curYM)
+    ? ` · <span style="color:var(--blue);">Current month excluded (partial data)</span>` : '';
+  const modelInfo = ef ? `<div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--bg-alt);line-height:1.7;">
+    <div>Model: <strong>${ef.model}</strong>${accuracyPct!==null?' · Accuracy: <strong>'+fmt(accuracyPct,2)+'%</strong> (MAPE: '+fmt(mapePct,1)+'%)':''}${partialNote}</div>
+    ${r2!==null?`<div title="Coefficient of determination — what fraction of the variance in actual sales is explained by the linear trend used in the Projection column. Closer to 1 = better fit. Negative = worse than predicting the simple mean.">Historical fit (R²): <strong style="color:${r2Color};">${r2.toFixed(3)}</strong> <span style="color:${r2Color};">· ${r2Label}</span> <span style="font-size:9px;color:var(--muted);">(based on ${cleanSales.length} complete months)</span></div>`:''}
+    ${!ef.hasEnoughData?'<div style="color:var(--yellow);">≥7 months recommended for better accuracy</div>':''}
   </div>` : '';
 
   let html = `<table class="proj-table">
@@ -3039,6 +3089,7 @@ function fmt(v, decimals = 2) {
 </script>
 </body>
 </html>
+
 
 
 
