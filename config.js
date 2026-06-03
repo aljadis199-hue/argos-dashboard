@@ -46,4 +46,3 @@ const ARGOS_CONFIG = {
     return this.FLOW_URL && !this.FLOW_URL.includes('REEMPLAZAR');
   }
 };
-
