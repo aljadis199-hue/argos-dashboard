@@ -131,12 +131,106 @@
     return [M[0][3],M[1][3],M[2][3]];
   }
 
+  // ── RANDOM FOREST (TIME-SERIES ADAPTATION) ─────────────────────────
+  // Univariate RF via lag features (1, 2, 3, 12) + month-of-year + rolling means (3, 6)
+  // 50 trees · max depth 4 · feature subsampling sqrt(p) · bootstrap aggregation
+  // Conservative to avoid overfitting on short monthly series (12–24 points typical)
+  function tsFeatures(data, idx) {
+    const lag1  = idx>=1  ? data[idx-1]  : 0;
+    const lag2  = idx>=2  ? data[idx-2]  : 0;
+    const lag3  = idx>=3  ? data[idx-3]  : 0;
+    const lag12 = idx>=12 ? data[idx-12] : 0;
+    const moy   = idx % 12;
+    const r3 = idx>=3 ? mean(data.slice(idx-3, idx)) : (idx>0?mean(data.slice(0,idx)):0);
+    const r6 = idx>=6 ? mean(data.slice(idx-6, idx)) : (idx>0?mean(data.slice(0,idx)):0);
+    return [lag1, lag2, lag3, lag12, moy, r3, r6];
+  }
+  function variance(arr) {
+    if (arr.length<2) return 0;
+    const m=mean(arr);
+    return arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length;
+  }
+  function bestSplit(samples) {
+    if (samples.length<4) return null;
+    const ys=samples.map(s=>s.y);
+    const baseVar=variance(ys);
+    const nFeat=samples[0].x.length;
+    // Feature subsampling (sqrt(p)) — clásico de Random Forest
+    const featPool=[];
+    const need=Math.max(2, Math.floor(Math.sqrt(nFeat)));
+    while (featPool.length<need) {
+      const f=Math.floor(Math.random()*nFeat);
+      if (!featPool.includes(f)) featPool.push(f);
+    }
+    let best=null;
+    featPool.forEach(f => {
+      const vals=[...new Set(samples.map(s=>s.x[f]))].sort((a,b)=>a-b);
+      for (let i=0;i<vals.length-1;i++) {
+        const t=(vals[i]+vals[i+1])/2;
+        const L=samples.filter(s=>s.x[f]<=t).map(s=>s.y);
+        const R=samples.filter(s=>s.x[f]>t).map(s=>s.y);
+        if (L.length<2||R.length<2) continue;
+        const wVar=(L.length*variance(L)+R.length*variance(R))/samples.length;
+        const gain=baseVar-wVar;
+        if (!best||gain>best.gain) best={feature:f,threshold:t,gain};
+      }
+    });
+    return best;
+  }
+  function buildTree(samples, depth, maxDepth) {
+    if (samples.length<4||depth>=maxDepth)
+      return {leaf:true, value:mean(samples.map(s=>s.y))};
+    const split=bestSplit(samples);
+    if (!split||split.gain<1e-6)
+      return {leaf:true, value:mean(samples.map(s=>s.y))};
+    const L=samples.filter(s=>s.x[split.feature]<=split.threshold);
+    const R=samples.filter(s=>s.x[split.feature]>split.threshold);
+    return {
+      leaf:false, feature:split.feature, threshold:split.threshold,
+      left:buildTree(L,depth+1,maxDepth), right:buildTree(R,depth+1,maxDepth)
+    };
+  }
+  function predictTree(tree, x) {
+    if (tree.leaf) return tree.value;
+    return predictTree(x[tree.feature]<=tree.threshold?tree.left:tree.right, x);
+  }
+  function randomForest(data, nTrees=50, maxDepth=4) {
+    if (data.length<6) return null;
+    const samples=[];
+    for (let i=3;i<data.length;i++) samples.push({x:tsFeatures(data,i), y:data[i]});
+    if (samples.length<4) return null;
+    const n=samples.length;
+    const trees=[];
+    for (let t=0;t<nTrees;t++) {
+      const boot=[];
+      for (let i=0;i<n;i++) boot.push(samples[Math.floor(Math.random()*n)]);
+      trees.push(buildTree(boot,0,maxDepth));
+    }
+    const predict=x => {
+      let s=0;
+      trees.forEach(tr => s+=predictTree(tr,x));
+      return clamp0(s/trees.length);
+    };
+    const fitted=[];
+    for (let i=0;i<data.length;i++) {
+      fitted.push(i<3 ? data[i] : predict(tsFeatures(data,i)));
+    }
+    return {
+      fitted,
+      forecast: h => {
+        const ext=[...data];
+        for (let i=0;i<h;i++) ext.push(predict(tsFeatures(ext, ext.length)));
+        return ext[ext.length-1];
+      }
+    };
+  }
+
   // ── WALK-FORWARD BACKTEST ──────────────────────────────────────────
   // Returns MAPE per model over the last testN out-of-sample periods
   function backtest(vals, testN) {
     const n=vals.length, trainStart=n-testN;
     if(trainStart<3) return {};
-    const errs={lr:[],ses:[],hl:[],hw:[],sn:[],ar:[]};
+    const errs={lr:[],ses:[],hl:[],hw:[],sn:[],ar:[],rf:[]};
     for(let t=trainStart;t<n;t++){
       const tr=vals.slice(0,t), actual=vals[t];
       const e=f=>Math.abs((actual-clamp0(f))/Math.max(1,actual));
@@ -146,6 +240,7 @@
       if(tr.length>=24){const hw=holtWinters(tr);if(hw)errs.hw.push(e(hw.forecast(1)));}
       if(tr.length>=13){const sn=seasonalNaive(tr);if(sn)errs.sn.push(e(sn.forecast(1)));}
       if(tr.length>=5){const ar=ar1(tr);if(ar)errs.ar.push(e(ar.forecast(1)));}
+      if(tr.length>=6){const rf=randomForest(tr,30,4);if(rf)errs.rf.push(e(rf.forecast(1)));}
     }
     const out={};
     for(const m in errs) if(errs[m].length>0) out[m]=mean(errs[m]);
@@ -170,6 +265,7 @@
     if(n>=24) M.hw = holtWinters(vals,0.35,0.10,0.25,12);
     if(n>=13) M.sn = seasonalNaive(vals,12);
     if(n>=5)  M.ar = ar1(vals);
+    if(n>=6)  M.rf = randomForest(vals,50,4);
 
     // Walk-forward MAPE to rank models
     const testN=Math.min(6, Math.floor(n/3));
@@ -209,7 +305,8 @@
         hl:  ()=>M.hl.forecast(h),
         hw:  ()=>M.hw?.forecast(h)||0,
         sn:  ()=>M.sn?.forecast(h)||0,
-        ar:  ()=>M.ar?.forecast(h)||0
+        ar:  ()=>M.ar?.forecast(h)||0,
+        rf:  ()=>M.rf?.forecast(h)||0
       };
       for(const k in weights) point+=weights[k]*(pred[k]?.()??0);
       point=clamp0(point);
@@ -222,14 +319,27 @@
 
     // Model name for display
     const bestKey=hasMape.length?hasMape.reduce((b,k)=>mapes[k]<mapes[b]?k:b,'hl'):'hl';
-    const modelName = M.hw&&(weights.hw||0)>0.25 ? 'Holt-Winters Ensemble'
+    const modelName = M.rf&&(weights.rf||0)>0.25 ? 'Random Forest Ensemble'
+                    : M.hw&&(weights.hw||0)>0.25 ? 'Holt-Winters Ensemble'
                     : M.sn&&(weights.sn||0)>0.20 ? 'Seasonal Naive Ensemble'
                     : M.ar&&(weights.ar||0)>0.20 ? 'AR(1) Ensemble'
                     : hasEnoughData                ? 'Adaptive Ensemble'
                     :                               'Exponential Smoothing';
     const overallMape=mapes[bestKey]??null;
 
-    return { ensemble, mape:overallMape, model:modelName, hasEnoughData, weights, modelMapes:mapes };
+    // In-sample fitted values del ensemble (uno por mes histórico)
+    // — usado para reconstruir las "Projection" históricas en la tabla
+    const fitted=[];
+    for(let i=0;i<n;i++){
+      let sum=0, wTot=0;
+      for(const k in weights){
+        const f = M[k] && M[k].fitted && M[k].fitted[i];
+        if (f!=null && isFinite(f)) { sum += weights[k]*f; wTot += weights[k]; }
+      }
+      fitted.push(clamp0(wTot>0 ? sum/wTot : vals[i]));
+    }
+
+    return { ensemble, fitted, mape:overallMape, model:modelName, hasEnoughData, weights, modelMapes:mapes };
   }
 
   // ── DAILY FORECAST ────────────────────────────────────────────────
